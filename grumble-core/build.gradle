@@ -1,0 +1,61 @@
+plugins {
+    id 'java-library'
+    id 'com.google.protobuf' version '0.9.5'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+group = 'gg.grumble'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+    maven {
+        name = "henkelmax.public"
+        url = 'https://maven.maxhenkel.de/repository/public'
+    }
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:4.31.1'
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            // Include generated Java files from .proto compilation
+            srcDir "$buildDir/generated/source/proto/main/java"
+        }
+    }
+}
+
+dependencies {
+    implementation 'de.maxhenkel.rnnoise4j:rnnoise4j:2.0.3'
+
+    implementation 'net.java.dev.jna:jna:5.17.0'
+    implementation 'club.minnced:opus-java-api:1.1.1'
+    implementation 'club.minnced:opus-java-natives:1.1.1'
+
+    // protobuf
+    implementation 'com.google.protobuf:protobuf-java:4.31.1'
+
+    // OCB-AES128 & PKCS12
+    implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
+    implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
+
+    // slf4j
+    implementation 'org.slf4j:slf4j-api:2.0.17'
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+test {
+    useJUnitPlatform()
+}

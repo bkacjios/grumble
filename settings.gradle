@@ -1,0 +1,4 @@
+rootProject.name = 'grumble'
+include 'grumble-core'
+include 'grumble-client'
+include 'grumble-server'

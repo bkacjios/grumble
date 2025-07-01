@@ -1,0 +1,48 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+    id 'org.springframework.boot' version '3.5.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+group = 'gg.grumble'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+    maven {
+        name = "henkelmax.public"
+        url = 'https://maven.maxhenkel.de/repository/public'
+    }
+}
+
+javafx {
+    version = '21.0.7'
+    modules = ['javafx.controls', 'javafx.fxml', 'javafx.web']
+}
+
+dependencies {
+    // Spring Boot
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation("org.springframework:spring-webflux")
+
+    // grumble
+    implementation project(":grumble-core")
+
+    // jansi colors
+    implementation 'org.fusesource.jansi:jansi:2.4.2'
+
+    // controlfx
+    implementation 'org.controlsfx:controlsfx:11.2.2'
+}
+
+test {
+    useJUnitPlatform()
+}
