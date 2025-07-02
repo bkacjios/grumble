@@ -56,7 +56,7 @@ public class MumbleVarInt {
         }
     }
 
-    public static long readVarInt(ByteBuffer buffer) {
+    private static long readVarInt(ByteBuffer buffer) {
         byte v = buffer.get();
 
         if ((v & 0x80) == 0x00) {
@@ -101,4 +101,23 @@ public class MumbleVarInt {
         }
     }
 
+    public static byte readVarIntByte(ByteBuffer buffer) {
+        return (byte) readVarInt(buffer);
+    }
+
+    public static short readVarIntShort(ByteBuffer buffer) {
+        return (short) readVarInt(buffer);
+    }
+
+    public static char readVarIntChar(ByteBuffer buffer) {
+        return (char) readVarInt(buffer);
+    }
+
+    public static int readVarIntInt(ByteBuffer buffer) {
+        return (int) readVarInt(buffer);
+    }
+
+    public static long readVarIntLong(ByteBuffer buffer) {
+        return readVarInt(buffer);
+    }
 }

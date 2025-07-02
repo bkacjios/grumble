@@ -1,17 +1,21 @@
-package gg.grumble.core.client;
+package gg.grumble.core.models;
 
+import gg.grumble.core.client.MumbleClient;
+import gg.grumble.core.utils.ShortRingBuffer;
 import gg.grumble.mumble.MumbleProto;
 
-import java.util.*;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 public class MumbleUser {
     private final MumbleClient client;
-    private final int session;
+    private final long session;
 
-    private Integer actor;
     private String name;
-    private int userId;
-    private Integer channelId;
+    private long userId;
+    private long channelId;
 
     private boolean mute;
     private boolean deaf;
@@ -30,7 +34,9 @@ public class MumbleUser {
 
     private final Set<Integer> listeningChannels = new LinkedHashSet<>();
 
-    public MumbleUser(MumbleClient client, int session) {
+    private final ShortRingBuffer pcmBuffer = new ShortRingBuffer(48000 * 2);
+
+    public MumbleUser(MumbleClient client, long session) {
         this.client = client;
         this.session = session;
     }
@@ -40,10 +46,9 @@ public class MumbleUser {
             throw new IllegalArgumentException("Session mismatch: expected " + this.session + ", got " + state.getSession());
         }
 
-        if (state.hasActor()) this.actor = state.getActor();
         if (state.hasName()) this.name = state.getName();
-        if (state.hasUserId()) this.userId = state.getUserId();
-        if (state.hasChannelId()) this.channelId = state.getChannelId();
+        if (state.hasUserId()) this.userId = Integer.toUnsignedLong(state.getUserId());
+        if (state.hasChannelId()) this.channelId = Integer.toUnsignedLong(state.getChannelId());
 
         if (state.hasMute()) this.mute = state.getMute();
         if (state.hasDeaf()) this.deaf = state.getDeaf();
@@ -71,23 +76,23 @@ public class MumbleUser {
         return client;
     }
 
-    public int getSession() {
+    public long getSession() {
         return session;
-    }
-
-    public Integer getActor() {
-        return actor;
     }
 
     public String getName() {
         return name;
     }
 
-    public int getUserId() {
+    public long getUserId() {
         return userId;
     }
 
-    public Integer getChannelId() {
+    public boolean isRegistered() {
+        return userId > 0;
+    }
+
+    public long getChannelId() {
         return channelId;
     }
 
@@ -150,7 +155,13 @@ public class MumbleUser {
         return client.getChannel(channelId);
     }
 
+    public void pushPcmAudio(short[] decodedPcm, int sampleCount) {
+        pcmBuffer.write(decodedPcm, 0, sampleCount);
+    }
 
+    public int popPcmAudio(short[] out, int maxSamples) {
+        return pcmBuffer.read(out, 0, maxSamples);
+    }
 
     @Override
     public String toString() {

@@ -1,11 +1,14 @@
 package gg.grumble.core.client;
 
+import club.minnced.opus.util.OpusLibrary;
 import com.google.protobuf.*;
 import gg.grumble.core.crypto.MumbleOCB2;
 import gg.grumble.core.enums.MumbleClientType;
 import gg.grumble.core.enums.MumbleMessageType;
 import gg.grumble.core.enums.MumblePacketTypeLegacy;
 import gg.grumble.core.enums.MumblePacketTypeProtobuf;
+import gg.grumble.core.models.MumbleChannel;
+import gg.grumble.core.models.MumbleUser;
 import gg.grumble.core.opus.OpusDecoder;
 import gg.grumble.core.utils.ExceptionUtils;
 import gg.grumble.core.utils.MumbleVarInt;
@@ -13,15 +16,19 @@ import gg.grumble.mumble.MumbleProto;
 import gg.grumble.mumble.MumbleUDPProto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import club.minnced.opus.util.OpusLibrary;
 
 import javax.net.ssl.*;
+import javax.sound.sampled.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.nio.*;
-import java.nio.channels.*;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.CancelledKeyException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.SocketChannel;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.SecureRandom;
@@ -36,8 +43,11 @@ public class MumbleClient {
 
     private static final int UDP_TCP_FALLBACK = 2;
 
-    private static final int MUMBLE_PLAYBACK_SAMPLE_RATE = 48000;
-    private static final int MUMBLE_PLAYBACK_CHANNELS = 2;
+    private static final int SAMPLE_RATE = 48000;
+    private static final int FRAME_DURATION_MS = 20;
+    private static final int CHANNELS = 2;
+    private static final int SAMPLES_PER_FRAME = (SAMPLE_RATE * FRAME_DURATION_MS) / 1000;
+    private static final int SAMPLES_PER_FRAME_TOTAL = SAMPLES_PER_FRAME * CHANNELS;
 
     private static final int MUMBLE_VERSION_MAJOR = 1;
     private static final int MUMBLE_VERSION_MINOR = 5;
@@ -74,10 +84,10 @@ public class MumbleClient {
 
     private MumbleUser self;
 
-    private final Map<Integer, MumbleUser> users = new HashMap<>();
-    private final Map<Integer, MumbleChannel> channels = new HashMap<>();
-    private final Map<Integer, List<MumbleChannel>> childrenByParent = new HashMap<>();
-    private final Map<Integer, List<MumbleUser>> usersInChannel = new HashMap<>();
+    private final Map<Long, MumbleUser> users = new HashMap<>();
+    private final Map<Long, MumbleChannel> channels = new HashMap<>();
+    private final Map<Long, List<MumbleChannel>> childrenByParent = new HashMap<>();
+    private final Map<Long, List<MumbleUser>> usersInChannel = new HashMap<>();
 
     private boolean synced = false;
 
@@ -96,6 +106,8 @@ public class MumbleClient {
     private final MumbleOCB2 crypto = new MumbleOCB2();
     private final OpusDecoder opusDecoder;
 
+    private final SourceDataLine audioOutput;
+
     private volatile boolean connected = false;
 
     public MumbleClient(String hostname, int port) {
@@ -108,7 +120,9 @@ public class MumbleClient {
             throw new RuntimeException("Failed to load opus library", e);
         }
 
-        this.opusDecoder = new OpusDecoder(MUMBLE_PLAYBACK_SAMPLE_RATE, MUMBLE_PLAYBACK_CHANNELS);
+        this.audioOutput = initAudioOutput();
+
+        this.opusDecoder = new OpusDecoder(SAMPLE_RATE, CHANNELS);
     }
 
     private void processUdpMessage(SocketAddress socketAddress, byte[] encrypted) {
@@ -154,6 +168,27 @@ public class MumbleClient {
             throw new RuntimeException("Failed to create UDP connection", e);
         }
     }
+
+    private SourceDataLine initAudioOutput() {
+        AudioFormat format = new AudioFormat(
+                48000,              // Sample rate
+                16,                 // Sample size in bits
+                2,                  // Channels (stereo)
+                true,               // Signed
+                false               // Little-endian
+        );
+
+        try {
+            DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
+            SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
+            line.open(format);
+            line.start();
+            return line;
+        } catch (LineUnavailableException e) {
+            throw new RuntimeException("Failed to initialize audio output", e);
+        }
+    }
+
 
     private void onConnectedTcp() {
         connectUdp();
@@ -255,7 +290,7 @@ public class MumbleClient {
     }
 
     private void onServerSync(MumbleProto.ServerSync sync) {
-        this.self = users.get(sync.getSession());
+        this.self = users.get(Integer.toUnsignedLong(sync.getSession()));
         this.synced = true;
 
         LOG.info("Fully synced with server");
@@ -265,8 +300,30 @@ public class MumbleClient {
         if (crypto.isInitialized()) {
             scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
         }
+        scheduler.scheduleAtFixedRate(this::mixAndPlayAudio, 0, 20, TimeUnit.MILLISECONDS);
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
+    }
+
+    private void mixAndPlayAudio() {
+        short[] mixBuffer = new short[SAMPLES_PER_FRAME_TOTAL];
+
+        for (MumbleUser user : getUsers()) {
+            short[] userBuffer = new short[SAMPLES_PER_FRAME_TOTAL];
+            int samples = user.popPcmAudio(userBuffer, SAMPLES_PER_FRAME_TOTAL);
+
+            if (samples < SAMPLES_PER_FRAME_TOTAL) {
+                continue;
+            }
+
+            for (int i = 0; i < samples; i++) {
+                int mixed = mixBuffer[i] + userBuffer[i];
+                mixBuffer[i] = (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, mixed));
+            }
+        }
+
+        byte[] audioBytes = shortsToBytes(mixBuffer);
+        audioOutput.write(audioBytes, 0, audioBytes.length);
     }
 
     /**
@@ -275,14 +332,12 @@ public class MumbleClient {
      * @param child The child channel to be removed
      */
     private void removeChildFromParent(MumbleChannel child) {
-        Integer parentId = child.getParentId();
-        if (parentId != null) {
-            List<MumbleChannel> allChildren = childrenByParent.get(parentId);
-            if (allChildren != null) {
-                allChildren.remove(child);
-                if (allChildren.isEmpty()) {
-                    childrenByParent.remove(parentId);
-                }
+        long parentId = child.getParentId();
+        List<MumbleChannel> allChildren = childrenByParent.get(parentId);
+        if (allChildren != null) {
+            allChildren.remove(child);
+            if (allChildren.isEmpty()) {
+                childrenByParent.remove(parentId);
             }
         }
     }
@@ -293,8 +348,8 @@ public class MumbleClient {
      * @param channel     Channel we are updating
      * @param newParentId Channels new parent ID
      */
-    private void updateChannelParent(MumbleChannel channel, Integer newParentId) {
-        Integer oldParentId = channel.getParentId();
+    private void updateChannelParent(MumbleChannel channel, long newParentId) {
+        long oldParentId = channel.getParentId();
 
         if (Objects.equals(oldParentId, newParentId)) {
             return;
@@ -302,13 +357,11 @@ public class MumbleClient {
 
         removeChildFromParent(channel);
 
-        if (newParentId != null) {
-            childrenByParent.computeIfAbsent(newParentId, k -> new ArrayList<>()).add(channel);
-        }
+        childrenByParent.computeIfAbsent(newParentId, k -> new ArrayList<>()).add(channel);
     }
 
     private void onChannelRemove(MumbleProto.ChannelRemove channelRemove) {
-        MumbleChannel channel = channels.remove(channelRemove.getChannelId());
+        MumbleChannel channel = channels.remove(Integer.toUnsignedLong(channelRemove.getChannelId()));
 
         if (channel != null) {
             removeChildFromParent(channel);
@@ -318,7 +371,7 @@ public class MumbleClient {
     }
 
     private void onChannelState(MumbleProto.ChannelState channelState) {
-        int channelId = channelState.getChannelId();
+        long channelId = Integer.toUnsignedLong(channelState.getChannelId());
 
         // Get the MumbleChannel for this channel ID or create a new one
         MumbleChannel channel = channels.computeIfAbsent(channelId, key -> new MumbleChannel(this, channelId));
@@ -335,7 +388,7 @@ public class MumbleClient {
         if (this.synced) fireEvent(new MumbleEvents.ChannelState(channel, channelState));
     }
 
-    private void removeUserFromChannel(Integer channel, MumbleUser user) {
+    private void removeUserFromChannel(long channel, MumbleUser user) {
         List<MumbleUser> oldList = usersInChannel.get(channel);
         if (oldList != null) {
             oldList.remove(user);
@@ -346,27 +399,25 @@ public class MumbleClient {
     }
 
     private void onUserRemove(MumbleProto.UserRemove userRemove) {
-        MumbleUser user = users.remove(userRemove.getSession());
+        MumbleUser user = users.remove(Integer.toUnsignedLong(userRemove.getSession()));
 
-        Integer channel = user.getChannelId();
+        long channel = user.getChannelId();
 
-        if (channel != null) {
-            removeUserFromChannel(channel, user);
-        }
+        removeUserFromChannel(channel, user);
 
         fireEvent(new MumbleEvents.UserRemove(user, userRemove));
     }
 
     private void onUserState(MumbleProto.UserState userState) {
-        int session = userState.getSession();
+        long session = userState.getSession();
 
         MumbleUser user = users.computeIfAbsent(session, key -> new MumbleUser(this, session));
 
         if (userState.hasChannelId()) {
-            Integer oldChannel = user.getChannelId();
-            int newChannel = userState.getChannelId();
+            long oldChannel = user.getChannelId();
+            long newChannel = Integer.toUnsignedLong(userState.getChannelId());
 
-            if (oldChannel != null && !Objects.equals(oldChannel, newChannel)) {
+            if (oldChannel != newChannel) {
                 removeUserFromChannel(oldChannel, user);
             }
 
@@ -375,8 +426,8 @@ public class MumbleClient {
 
         if (this.synced && userState.hasChannelId()) {
             // We are fully synced and the user is changing channels
-            Integer fromChannelId = user.getChannelId();
-            int toChannelId = userState.getChannelId();
+            long fromChannelId = user.getChannelId();
+            long toChannelId = userState.getChannelId();
 
             if (!Objects.equals(fromChannelId, toChannelId)) {
                 MumbleChannel from = getChannel(fromChannelId);
@@ -567,6 +618,7 @@ public class MumbleClient {
                 }
             }
         } catch (IOException e) {
+            LOG.error("Error reading from TCP socket", e);
             onDisconnected(ExceptionUtils.getRootCause(e).getLocalizedMessage());
         } finally {
             try {
@@ -733,23 +785,23 @@ public class MumbleClient {
 
     private void handleUdpLegacyPacket(ByteBuffer data, boolean udp) {
         byte header = data.get();
-        byte id = (byte) ((header >> 5) & 0x7);
+        byte type = (byte) ((header >> 5) & 0x7);
 
-        switch (id) {
+        switch (type) {
             case MumblePacketTypeLegacy.PING: {
-                onServerPongUdpLegacy(MumbleVarInt.readVarInt(data), udp);
+                onServerPongUdpLegacy(MumbleVarInt.readVarIntLong(data), udp);
                 break;
             }
             case MumblePacketTypeLegacy.OPUS:
             case MumblePacketTypeLegacy.SPEEX:
             case MumblePacketTypeLegacy.CELT_ALPHA:
             case MumblePacketTypeLegacy.CELT_BETA: {
-                byte target = (byte) (header >> 0x1F);
-                handleLegacyAudio(target, id, data); // id is codec in this case
+                byte target = (byte) (header & 0x1F);
+                handleLegacyAudio(target, type, data); // id is codec in this case
                 break;
             }
             default:
-                throw new IllegalStateException("Tried to process unhandled legacy UDP packet: " + id);
+                throw new IllegalStateException("Tried to process unhandled legacy UDP packet: " + type);
         }
     }
 
@@ -797,8 +849,10 @@ public class MumbleClient {
      * @param data   The data we received
      */
     private void handleLegacyAudio(byte target, byte codec, ByteBuffer data) {
-        long session = MumbleVarInt.readVarInt(data);
-        long sequence = MumbleVarInt.readVarInt(data);
+        long session = MumbleVarInt.readVarIntLong(data);
+        long sequence = MumbleVarInt.readVarIntLong(data);
+
+        MumbleUser user = getUser(session);
 
         boolean speaking = false;
         int payloadLen = 0;
@@ -810,7 +864,7 @@ public class MumbleClient {
             byte[] payload = new byte[payloadLen];
             data.get(payload);
         } else if (codec == MumblePacketTypeLegacy.OPUS) {
-            long frameHeader = MumbleVarInt.readVarInt(data);
+            long frameHeader = MumbleVarInt.readVarIntLong(data);
             payloadLen = Math.toIntExact(frameHeader & 0x1FFF);
             speaking = ((frameHeader & 0x2000) == 0);
 
@@ -818,9 +872,10 @@ public class MumbleClient {
             data.get(payload);
 
             int frameSize = opusDecoder.getNbSamples(payload);
-            short[] pcm = new short[frameSize * MUMBLE_PLAYBACK_CHANNELS];
+            short[] pcm = new short[frameSize * CHANNELS];
             int decodedSamples = opusDecoder.decode(payload, pcm, frameSize);
-            byte[] audioData = shortsToBytes(Arrays.copyOf(pcm, decodedSamples));
+
+            user.pushPcmAudio(pcm, decodedSamples);
         }
     }
 
@@ -1193,11 +1248,15 @@ public class MumbleClient {
         return List.copyOf(users.values());
     }
 
+    public MumbleUser getUser(long session) {
+        return users.get(session);
+    }
+
     public List<MumbleChannel> getChannels() {
         return List.copyOf(channels.values());
     }
 
-    public MumbleChannel getChannel(int channelId) {
+    public MumbleChannel getChannel(long channelId) {
         return channels.get(channelId);
     }
 
@@ -1205,7 +1264,7 @@ public class MumbleClient {
         return getChannelUsers(channel.getChannelId());
     }
 
-    public List<MumbleUser> getChannelUsers(int channelId) {
+    public List<MumbleUser> getChannelUsers(long channelId) {
         List<MumbleUser> list = usersInChannel.get(channelId);
         return (list != null) ? List.copyOf(list) : Collections.emptyList();
     }
@@ -1227,7 +1286,7 @@ public class MumbleClient {
      * @param channelId Channel ID we want the list of children for
      * @return List of all MumbleChannel children
      */
-    public List<MumbleChannel> getChildren(int channelId) {
+    public List<MumbleChannel> getChildren(long channelId) {
         return childrenByParent.get(channelId);
     }
 

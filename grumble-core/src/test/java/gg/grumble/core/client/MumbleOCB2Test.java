@@ -1,10 +1,10 @@
 package gg.grumble.core.client;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 import gg.grumble.core.crypto.MumbleOCB2;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 public class MumbleOCB2Test {
     /**

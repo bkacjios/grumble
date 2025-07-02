@@ -1,14 +1,18 @@
-package gg.grumble.core.client;
+package gg.grumble.core.models;
 
+import gg.grumble.core.client.MumbleClient;
 import gg.grumble.mumble.MumbleProto;
 
-import java.util.*;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 public class MumbleChannel {
 	private final MumbleClient client;
-	private final int channelId;
+	private final long channelId;
 
-	private Integer parent;
+	private long parent;
 	private String name;
 	private String description;
 	private boolean temporary;
@@ -20,7 +24,7 @@ public class MumbleChannel {
 
 	private final Set<Integer> links = new LinkedHashSet<>();
 
-	public MumbleChannel(MumbleClient client, int channelId) {
+	public MumbleChannel(MumbleClient client, long channelId) {
 		this.client = client;
 		this.channelId = channelId;
 	}
@@ -30,7 +34,7 @@ public class MumbleChannel {
 			throw new IllegalArgumentException("Channel ID mismatch: expected " + this.channelId + ", got " + state.getChannelId());
 		}
 
-		if (state.hasParent()) this.parent = state.getParent();
+		if (state.hasParent()) this.parent = Integer.toUnsignedLong(state.getParent());
 		if (state.hasName()) this.name = state.getName();
 		if (state.hasDescription()) this.description = state.getDescription();
 		if (state.hasTemporary()) this.temporary = state.getTemporary();
@@ -54,11 +58,11 @@ public class MumbleChannel {
 
 	public MumbleClient getClient() { return client; }
 
-	public int getChannelId() {
+	public long getChannelId() {
 		return channelId;
 	}
 
-	public Integer getParentId() {
+	public long getParentId() {
 		return parent;
 	}
 

@@ -1,5 +1,7 @@
 package gg.grumble.core.client;
 
+import gg.grumble.core.models.MumbleChannel;
+import gg.grumble.core.models.MumbleUser;
 import gg.grumble.mumble.MumbleProto;
 import gg.grumble.mumble.MumbleUDPProto;
 
