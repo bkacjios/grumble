@@ -69,6 +69,7 @@ public class MumbleClient {
 
     private MumbleUser me;
     private final Map<Integer, MumbleUser> users = new HashMap<>();
+    private final Map<Integer, MumbleChannel> channels = new HashMap<>();
 
     private boolean synced = false;
 
@@ -225,6 +226,11 @@ public class MumbleClient {
     }
 
     private void onChannelState(MumbleProto.ChannelState channelState) {
+        int channelId = channelState.getChannelId();
+
+        MumbleChannel channel = channels.computeIfAbsent(channelId, key -> new MumbleChannel(this, channelId));
+        channel.update(channelState);
+
         fireEvent(new MumbleEvents.ChannelState(channelState));
     }
 

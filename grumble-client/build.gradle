@@ -38,9 +38,6 @@ dependencies {
 
     // jansi colors
     implementation 'org.fusesource.jansi:jansi:2.4.2'
-
-    // controlfx
-    implementation 'org.controlsfx:controlsfx:11.2.2'
 }
 
 test {
