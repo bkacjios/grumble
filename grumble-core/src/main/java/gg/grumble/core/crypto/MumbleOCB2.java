@@ -107,8 +107,8 @@ public class MumbleOCB2 {
         return encrypt(data);
     }
 
-    private boolean ocbEncrypt(byte[] plain, int len, byte[] nonce,
-                               byte[] out, byte[] tag) {
+    private void ocbEncrypt(byte[] plain, int len, byte[] nonce,
+                            byte[] out, byte[] tag) {
         byte[] delta = new byte[BLOCK_SIZE];
         byte[] checksum = new byte[BLOCK_SIZE];
         byte[] tmp = new byte[BLOCK_SIZE];
@@ -158,7 +158,6 @@ public class MumbleOCB2 {
         for (int i = 0; i < BLOCK_SIZE; i++) tmp[i] = (byte) (delta[i] ^ checksum[i]);
         aesEnc(tmp, tag);
 
-        return true;
     }
 
     public byte[] decrypt(byte[] packet) {
