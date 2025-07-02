@@ -1,6 +1,7 @@
 package gg.grumble.core.client;
 
 import com.google.protobuf.*;
+import gg.grumble.core.crypto.MumbleOCB2;
 import gg.grumble.core.enums.MumbleClientType;
 import gg.grumble.core.enums.MumbleMessageType;
 import gg.grumble.core.enums.MumblePacketTypeLegacy;
@@ -18,6 +19,7 @@ import javax.net.ssl.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.nio.*;
 import java.nio.channels.*;
 import java.security.GeneralSecurityException;
@@ -42,7 +44,7 @@ public class MumbleClient {
     private static final int UDP_BUFFER_MAX = 1024;
 
     private static final float PING_MILLIS = 1e6f;
-    private static final int PING_PERIOD_SECONDS = 30;
+    private static final int PING_PERIOD_SECONDS = 5;
 
     private static final int MUMBLE_VERSION_v1 = MUMBLE_VERSION_MAJOR << 16 | MUMBLE_VERSION_MINOR << 8 | MUMBLE_VERSION_PATCH;
     private static final long MUMBLE_VERSION_V2 = ((long) MUMBLE_VERSION_MAJOR << 48)
@@ -50,6 +52,8 @@ public class MumbleClient {
 
     private final String hostname;
     private final int port;
+
+    private MumbleUDPConnection udpConnection;
 
     private SocketChannel socketChannel;
     private SSLEngine sslEngine;
@@ -85,7 +89,7 @@ public class MumbleClient {
     private float udpPingAverage = 0;
     private float udpPingDeviation = 0;
 
-    private final MumbleCrypto crypto = new MumbleCrypto();
+    private final MumbleOCB2 crypto = new MumbleOCB2();
     private final OpusDecoder opusDecoder;
 
     private volatile boolean connected = false;
@@ -101,6 +105,15 @@ public class MumbleClient {
         }
 
         this.opusDecoder = new OpusDecoder(MUMBLE_PLAYBACK_SAMPLE_RATE, MUMBLE_PLAYBACK_CHANNELS);
+    }
+
+    private void processUdpMessage(SocketAddress socketAddress, byte[] encrypted) {
+        LOG.info("Received encrypted UDP message: {}", toHex(encrypted));
+        if (crypto.isInitialized()) {
+            byte[] decrypted = crypto.decrypt(encrypted);
+            LOG.info("Decrypted UDP message: {}", toHex(decrypted));
+            onUdpTunnel(ByteBuffer.wrap(decrypted));
+        }
     }
 
     public MumbleClient(String hostname) {
@@ -131,7 +144,19 @@ public class MumbleClient {
         }
     }
 
-    private void onConnected() {
+    private void connectUdp() {
+        try {
+            LOG.info("Connecting to UDP");
+            udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
+            udpConnection.start();
+            LOG.info("Listening to UDP messages");
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create UDP connection", e);
+        }
+    }
+
+    private void onConnectedTcp() {
+        connectUdp();
         sendVersion();
         fireEvent(new MumbleEvents.Connected());
     }
@@ -226,7 +251,7 @@ public class MumbleClient {
 
         // Schedule TCP & UDP pings to keep connection alive
         scheduler.scheduleAtFixedRate(this::pingTcp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
-        if (crypto.isValid()) {
+        if (crypto.isInitialized()) {
             scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
         }
 
@@ -366,7 +391,7 @@ public class MumbleClient {
             LOG.warn("Cipher disagreement: Renegotiating with server!");
         }
 
-        if (crypto.isValid()) {
+        if (crypto.isInitialized()) {
             LOG.info("Cipher setup: handshake complete");
         } else {
             LOG.warn("Cipher setup: handshake failed");
@@ -560,7 +585,7 @@ public class MumbleClient {
 
         if (hsStatus == SSLEngineResult.HandshakeStatus.FINISHED) {
             connected = true;
-            onConnected();
+            onConnectedTcp();
         }
     }
 
@@ -758,8 +783,6 @@ public class MumbleClient {
             short[] pcm = new short[frameSize * MUMBLE_PLAYBACK_CHANNELS];
             int decodedSamples = opusDecoder.decode(payload, pcm, frameSize);
             byte[] audioData = shortsToBytes(Arrays.copyOf(pcm, decodedSamples));
-
-
         }
     }
 
@@ -1094,11 +1117,26 @@ public class MumbleClient {
             ByteBuffer packet = ByteBuffer.allocate(UDP_BUFFER_MAX);
             packet.put((byte) (MumblePacketTypeLegacy.PING << 5));
             MumbleVarInt.writeVarInt(packet, System.nanoTime());
+            packet.flip();
+            try {
+                LOG.info("Unencrypted UDP ping: {}", toHex(packet));
+                byte[] encrypted = crypto.encrypt(packet);
+                LOG.info("Sending encrypted legacy UDP ping: {}", toHex(encrypted));
+                udpConnection.send(encrypted);
+            } catch (Exception e) {
+                LOG.error("Unable to encrypt or send UDP packet", e);
+            }
         } else {
             MumbleUDPProto.Ping.Builder ping = MumbleUDPProto.Ping.newBuilder();
             ping.setTimestamp(System.nanoTime());
+            try {
+                byte[] encrypted = crypto.encrypt(ping.build().toByteArray());
+                LOG.info("Sending encrypted protobuf UDP ping: {}", toHex(encrypted));
+                udpConnection.send(encrypted);
+            } catch (Exception e) {
+                LOG.error("Unable to encrypt or send UDP packet", e);
+            }
         }
-        // TODO: Send UDP packet
     }
 
     private void sendVersion() {
