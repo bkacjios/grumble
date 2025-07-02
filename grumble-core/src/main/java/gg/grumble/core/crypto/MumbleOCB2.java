@@ -91,7 +91,7 @@ public class MumbleOCB2 {
 
         // increment IV once
         incIV(encryptIV);
-        ocbEncrypt(plain, 0, plain.length, encryptIV, ciphertext, tag);
+        ocbEncrypt(plain, plain.length, encryptIV, ciphertext, tag);
 
         out[0] = encryptIV[0];
         System.arraycopy(tag, 0, out, 1, TAG_TRUNCATED);
@@ -107,7 +107,7 @@ public class MumbleOCB2 {
         return encrypt(data);
     }
 
-    private boolean ocbEncrypt(byte[] plain, int off, int len, byte[] nonce,
+    private boolean ocbEncrypt(byte[] plain, int len, byte[] nonce,
                                byte[] out, byte[] tag) {
         byte[] delta = new byte[BLOCK_SIZE];
         byte[] checksum = new byte[BLOCK_SIZE];
@@ -118,7 +118,7 @@ public class MumbleOCB2 {
         aesEnc(Arrays.copyOf(nonce, BLOCK_SIZE), delta);
         Arrays.fill(checksum, (byte) 0);
 
-        int pos = off, outPos = 0, rem = len;
+        int pos = 0, outPos = 0, rem = len;
         // full blocks
         while (rem > BLOCK_SIZE) {
             s2(delta);
@@ -144,8 +144,8 @@ public class MumbleOCB2 {
 
         // ─── checksum sees raw plaintext (and pad tail) ───
         byte[] tmpBlk = new byte[BLOCK_SIZE];
-        for (int i = 0; i < rem; i++) tmpBlk[i] = plain[pos + i];
-        for (int i = rem; i < BLOCK_SIZE; i++) tmpBlk[i] = pad[i];
+        if (rem >= 0) System.arraycopy(plain, pos, tmpBlk, 0, rem);
+        if (BLOCK_SIZE - rem >= 0) System.arraycopy(pad, rem, tmpBlk, rem, BLOCK_SIZE - rem);
         for (int i = 0; i < BLOCK_SIZE; i++) checksum[i] ^= tmpBlk[i];
 
         // produce ciphertext bytes
@@ -163,52 +163,48 @@ public class MumbleOCB2 {
 
     public byte[] decrypt(byte[] packet) {
         byte[] saveIV = Arrays.copyOf(decryptIV, BLOCK_SIZE);
+        int lateCount = 0;
+        int lostCount = 0;
+        boolean restore = false;
 
         if (packet == null || packet.length < 4) {
-            // too short or null → no change
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
             return null;
         }
 
         int iv = packet[0] & 0xFF;
         int cur = decryptIV[0] & 0xFF;
-        int lateCount = 0;
-        int lostCount = 0;
-        boolean restore = false;
 
-        // in‐order?
-        if (((cur + 1) & 0xFF) == iv) {
+        // normalize into –128..127
+        int diff = iv - cur;
+        if (diff > 128) diff -= 256;
+        else if (diff < -128) diff += 256;
+
+        if (diff == 1) {
+            // in-order
             if (iv > cur) {
-                // normal advance
                 decryptIV[0] = (byte) iv;
             } else {
-                // wrapped around
+                // wrapped BE counter
                 decryptIV[0] = (byte) iv;
                 for (int i = 1; i < BLOCK_SIZE; i++) {
                     if (++decryptIV[i] != 0) break;
                 }
             }
-        }
-        // duplicate packet?
-        else if (iv == cur) {
+        } else if (diff == 0) {
+            // duplicate =drop
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
             return null;
-        }
-        // out‐of‐order / lost / wrapped / late
-        else {
-            int diff = iv - cur;
-            if (diff > 128) diff -= 256;
-            if (diff < -128) diff += 256;
-
-            // late but within window (no wrap)
-            if ((iv < cur) && diff > -30 && diff < 0) {
+        } else if (diff < 0) {
+            // either late or lost-with-wrap
+            if ((iv < cur) && (diff > -30)) {
+                // late, no wrap
                 lateCount = 1;
                 lostCount = -1;
                 decryptIV[0] = (byte) iv;
                 restore = true;
-            }
-            // late with wraparound decrement
-            else if ((iv > cur) && diff > -30 && diff < 0) {
+            } else if ((iv > cur) && (diff > -30)) {
+                // late with wraparound decrement
                 lateCount = 1;
                 lostCount = -1;
                 decryptIV[0] = (byte) iv;
@@ -218,11 +214,6 @@ public class MumbleOCB2 {
                     if (old != 0) break;
                 }
                 restore = true;
-            }
-            else if (diff > 0) {
-                // lost forward
-                lostCount = diff - 1;
-                decryptIV[0] = (byte) iv;
             } else {
                 // lost with wrap
                 lostCount = 256 - cur + iv - 1;
@@ -231,9 +222,13 @@ public class MumbleOCB2 {
                     if (++decryptIV[i] != 0) break;
                 }
             }
+        } else {
+            // diff > 0 = lost forward
+            lostCount = diff - 1;
+            decryptIV[0] = (byte) iv;
         }
 
-        // replay check
+        // replay protection
         int idx = decryptIV[0] & 0xFF;
         int decVal = decryptIV[1] & 0xFF;
         if (decryptHistory[idx] == (byte) decVal) {
@@ -241,24 +236,27 @@ public class MumbleOCB2 {
             return null;
         }
 
-        // peel off tag + ciphertext
+        // decrypt body…
         byte[] tagBytes = Arrays.copyOfRange(packet, 1, 1 + TAG_TRUNCATED);
         byte[] cipher = Arrays.copyOfRange(packet, 4, packet.length);
-
         byte[] plain = new byte[cipher.length];
-        boolean ok = ocbDecrypt(cipher, 0, cipher.length, decryptIV, plain, tagBytes);
-        if (!ok) {
+        if (!ocbDecrypt(cipher, cipher.length, decryptIV, plain, tagBytes)) {
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
             return null;
         }
 
-        // stats
+        // update stats
         decryptHistory[idx] = (byte) decVal;
         good++;
         late += lateCount;
-        lost = Math.max(0, lost + lostCount);
+        if (lostCount > 0) {
+            lost += lostCount;
+        } else if (lost > -lostCount) {
+            lost += lostCount;
+        }
+
         if (restore) {
-            // exact match to C++: restore IV *then* count resync
+            // roll back IV after a late packet
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
             resync++;
         }
@@ -266,7 +264,7 @@ public class MumbleOCB2 {
         return plain;
     }
 
-    private boolean ocbDecrypt(byte[] cipher, int off, int len,
+    private boolean ocbDecrypt(byte[] cipher, int len,
                                byte[] nonce, byte[] out, byte[] tag) {
         byte[] delta = new byte[BLOCK_SIZE];
         byte[] checksum = new byte[BLOCK_SIZE];
@@ -276,7 +274,7 @@ public class MumbleOCB2 {
         aesEnc(Arrays.copyOf(nonce, BLOCK_SIZE), delta);
         Arrays.fill(checksum, (byte) 0);
 
-        int pos = off, outPos = 0, rem = len;
+        int pos = 0, outPos = 0, rem = len;
         while (rem > BLOCK_SIZE) {
             s2(delta);
             for (int i = 0; i < BLOCK_SIZE; i++) tmp[i] = (byte) (delta[i] ^ cipher[pos + i]);
@@ -299,7 +297,7 @@ public class MumbleOCB2 {
 
         byte[] fullBlk = new byte[BLOCK_SIZE];
         for (int i = 0; i < rem; i++) fullBlk[i] = (byte) (cipher[pos + i] ^ pad[i]);
-        for (int i = rem; i < BLOCK_SIZE; i++) fullBlk[i] = pad[i];
+        if (BLOCK_SIZE - rem >= 0) System.arraycopy(pad, rem, fullBlk, rem, BLOCK_SIZE - rem);
         for (int i = 0; i < BLOCK_SIZE; i++) checksum[i] ^= fullBlk[i];
 
         if (Arrays.equals(
