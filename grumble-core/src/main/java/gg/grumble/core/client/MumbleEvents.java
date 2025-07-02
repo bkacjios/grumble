@@ -24,6 +24,9 @@ public final class MumbleEvents {
     public record ServerPongUdpProtobuf(MumbleUDPProto.Ping ping) implements MumbleEvent {
     }
 
+    public record TcpTunnelActive(boolean active) implements MumbleEvent {
+    }
+
     public record ServerReject(MumbleProto.Reject reject) implements MumbleEvent {
     }
 

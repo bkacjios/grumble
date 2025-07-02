@@ -34,6 +34,8 @@ import java.util.concurrent.TimeUnit;
 public class MumbleClient {
     private static final Logger LOG = LoggerFactory.getLogger(MumbleClient.class);
 
+    private static final int UDP_TCP_FALLBACK = 2;
+
     private static final int MUMBLE_PLAYBACK_SAMPLE_RATE = 48000;
     private static final int MUMBLE_PLAYBACK_CHANNELS = 2;
 
@@ -75,11 +77,13 @@ public class MumbleClient {
     private final Map<Integer, MumbleUser> users = new HashMap<>();
     private final Map<Integer, MumbleChannel> channels = new HashMap<>();
     private final Map<Integer, List<MumbleChannel>> childrenByParent = new HashMap<>();
+    private final Map<Integer, List<MumbleUser>> usersInChannel = new HashMap<>();
 
     private boolean synced = false;
 
     private boolean legacyConnection = false;
-    private boolean udpTunnel = false;
+    private boolean tcpUdpTunnel = true;
+    private int udpPingAccumulator = 0;
 
     private int tcpPingPackets = 0;
     private float tcpPingAverage = 0;
@@ -108,11 +112,9 @@ public class MumbleClient {
     }
 
     private void processUdpMessage(SocketAddress socketAddress, byte[] encrypted) {
-        LOG.info("Received encrypted UDP message: {}", toHex(encrypted));
         if (crypto.isInitialized()) {
             byte[] decrypted = crypto.decrypt(encrypted);
-            LOG.info("Decrypted UDP message: {}", toHex(decrypted));
-            onUdpTunnel(ByteBuffer.wrap(decrypted));
+            onUdpTunnel(ByteBuffer.wrap(decrypted), true);
         }
     }
 
@@ -207,17 +209,10 @@ public class MumbleClient {
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
      *
      * @param ping The ping data that was sent
+     * @param udp
      */
-    private void onServerPongUdpProtobuf(MumbleUDPProto.Ping ping) {
-        long now = System.nanoTime();
-        long time = ping.getTimestamp();
-
-        float delay = (now - time) / PING_MILLIS;
-
-        float n = ++udpPingPackets;
-        udpPingAverage += (delay - udpPingAverage) / n;
-        udpPingDeviation = (float) Math.pow(Math.abs(delay - udpPingAverage), 2);
-
+    private void onServerPongUdpProtobuf(MumbleUDPProto.Ping ping, boolean udp) {
+        updateUdpPing(ping.getTimestamp(), udp);
         fireEvent(new MumbleEvents.ServerPongUdpProtobuf(ping));
     }
 
@@ -225,18 +220,36 @@ public class MumbleClient {
      * If the mumble server only has a v1 version, the ping message is just a MumbleVarInt encoded timestamp
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
      *
-     * @param time Timestamp the ping was sent
+     * @param timestamp Timestamp the ping was sent
+     * @param udp
      */
-    private void onServerPongUdpLegacy(long time) {
+    private void onServerPongUdpLegacy(long timestamp, boolean udp) {
+        fireEvent(new MumbleEvents.ServerPongUdpLegacy(updateUdpPing(timestamp, udp)));
+    }
+
+    private float updateUdpPing(long timestamp, boolean udp) {
         long now = System.nanoTime();
 
-        float delay = (now - time) / PING_MILLIS;
+        float delay = (now - timestamp) / PING_MILLIS;
 
         float n = ++udpPingPackets;
         udpPingAverage += (delay - udpPingAverage) / n;
         udpPingDeviation = (float) Math.pow(Math.abs(delay - udpPingAverage), 2);
 
-        fireEvent(new MumbleEvents.ServerPongUdpLegacy(delay));
+        if (udp && tcpUdpTunnel) {
+            if (udpPingAccumulator >= UDP_TCP_FALLBACK) {
+                // We suddenly got a response, after sending out pings with multiple missing responses
+                LOG.warn("[UDP] Server is responding to UDP packets again, disabling TCP tunnel");
+            }
+            // Fallback to tunneling UDP data through TCP
+            LOG.info("[UDP] Connective active");
+            tcpUdpTunnel = false;
+            fireEvent(new MumbleEvents.TcpTunnelActive(false));
+        }
+
+        udpPingAccumulator = 0;
+
+        return delay;
     }
 
     private void onServerReject(MumbleProto.Reject reject) {
@@ -324,8 +337,25 @@ public class MumbleClient {
         if (this.synced) fireEvent(new MumbleEvents.ChannelState(channel, channelState));
     }
 
+    private void removeUserFromChannel(Integer channel, MumbleUser user) {
+        List<MumbleUser> oldList = usersInChannel.get(channel);
+        if (oldList != null) {
+            oldList.remove(user);
+            if (oldList.isEmpty()) {
+                usersInChannel.remove(channel);
+            }
+        }
+    }
+
     private void onUserRemove(MumbleProto.UserRemove userRemove) {
         MumbleUser user = users.remove(userRemove.getSession());
+
+        Integer channel = user.getChannelId();
+
+        if (channel != null) {
+            removeUserFromChannel(channel, user);
+        }
+
         fireEvent(new MumbleEvents.UserRemove(user, userRemove));
     }
 
@@ -333,6 +363,17 @@ public class MumbleClient {
         int session = userState.getSession();
 
         MumbleUser user = users.computeIfAbsent(session, key -> new MumbleUser(this, session));
+
+        if (userState.hasChannelId()) {
+            Integer oldChannel = user.getChannelId();
+            int newChannel = userState.getChannelId();
+
+            if (oldChannel != null && !Objects.equals(oldChannel, newChannel)) {
+                removeUserFromChannel(oldChannel, user);
+            }
+
+            usersInChannel.computeIfAbsent(newChannel, k -> new ArrayList<>()).add(user);
+        }
 
         if (this.synced && userState.hasChannelId()) {
             // We are fully synced and the user is changing channels
@@ -667,7 +708,7 @@ public class MumbleClient {
 
             try {
                 if (legacyConnection && messageType.equals(MumbleMessageType.UDP_TUNNEL)) {
-                    handleUdpLegacyPacket(ByteBuffer.wrap(data));
+                    handleUdpLegacyPacket(ByteBuffer.wrap(data), false);
                 } else {
                     // Use protobuf parser for the message type
                     MessageLite message = parseProtobufMessage(messageType, data);
@@ -684,22 +725,21 @@ public class MumbleClient {
         appInBuffer.compact();
     }
 
-    private void onUdpTunnel(ByteBuffer data) {
+    private void onUdpTunnel(ByteBuffer data, boolean udp) {
         if (legacyConnection) {
-            handleUdpLegacyPacket(data);
+            handleUdpLegacyPacket(data, udp);
         } else {
-            handleUdpProtobufPacket(data);
+            handleUdpProtobufPacket(data, udp);
         }
     }
 
-    private void handleUdpLegacyPacket(ByteBuffer data) {
+    private void handleUdpLegacyPacket(ByteBuffer data, boolean udp) {
         byte header = data.get();
         byte id = (byte) ((header >> 5) & 0x7);
 
         switch (id) {
             case MumblePacketTypeLegacy.PING: {
-                long time = MumbleVarInt.readVarInt(data);
-                onServerPongUdpLegacy(time);
+                onServerPongUdpLegacy(MumbleVarInt.readVarInt(data), udp);
                 break;
             }
             case MumblePacketTypeLegacy.OPUS:
@@ -715,7 +755,7 @@ public class MumbleClient {
         }
     }
 
-    private void handleUdpProtobufPacket(ByteBuffer data) {
+    private void handleUdpProtobufPacket(ByteBuffer data, boolean udp) {
         byte id = data.get();
 
         try {
@@ -727,7 +767,7 @@ public class MumbleClient {
                 }
                 case MumblePacketTypeProtobuf.PING: {
                     MumbleUDPProto.Ping ping = MumbleUDPProto.Ping.parseFrom(data);
-                    onServerPongUdpProtobuf(ping);
+                    onServerPongUdpProtobuf(ping, udp);
                     break;
                 }
                 default:
@@ -804,7 +844,7 @@ public class MumbleClient {
             }
             case UDP_TUNNEL -> {
                 if (message instanceof MumbleProto.UDPTunnel tunnel) {
-                    onUdpTunnel(tunnel.getPacket().asReadOnlyByteBuffer());
+                    onUdpTunnel(tunnel.getPacket().asReadOnlyByteBuffer(), false);
                 }
             }
             case PING -> {
@@ -1119,10 +1159,7 @@ public class MumbleClient {
             MumbleVarInt.writeVarInt(packet, System.nanoTime());
             packet.flip();
             try {
-                LOG.info("Unencrypted UDP ping: {}", toHex(packet));
-                byte[] encrypted = crypto.encrypt(packet);
-                LOG.info("Sending encrypted legacy UDP ping: {}", toHex(encrypted));
-                udpConnection.send(encrypted);
+                udpConnection.send(crypto.encrypt(packet));
             } catch (Exception e) {
                 LOG.error("Unable to encrypt or send UDP packet", e);
             }
@@ -1130,13 +1167,18 @@ public class MumbleClient {
             MumbleUDPProto.Ping.Builder ping = MumbleUDPProto.Ping.newBuilder();
             ping.setTimestamp(System.nanoTime());
             try {
-                byte[] encrypted = crypto.encrypt(ping.build().toByteArray());
-                LOG.info("Sending encrypted protobuf UDP ping: {}", toHex(encrypted));
-                udpConnection.send(encrypted);
+                udpConnection.send(crypto.encrypt(ping.build().toByteArray()));
             } catch (Exception e) {
                 LOG.error("Unable to encrypt or send UDP packet", e);
             }
         }
+        if (udpPingAccumulator >= UDP_TCP_FALLBACK && !tcpUdpTunnel) {
+            // We didn't get a response from a ping 3 times in a row
+            LOG.warn("[UDP] Server no longer responding to UDP pings, falling back to TCP..");
+            tcpUdpTunnel = true;
+            fireEvent(new MumbleEvents.TcpTunnelActive(true));
+        }
+        udpPingAccumulator++;
     }
 
     private void sendVersion() {
@@ -1160,6 +1202,16 @@ public class MumbleClient {
     public MumbleChannel getChannel(int channelId) {
         return channels.get(channelId);
     }
+
+    public List<MumbleUser> getChannelUsers(MumbleChannel channel) {
+        return getChannelUsers(channel.getChannelId());
+    }
+
+    public List<MumbleUser> getChannelUsers(int channelId) {
+        List<MumbleUser> list = usersInChannel.get(channelId);
+        return (list != null) ? List.copyOf(list) : Collections.emptyList();
+    }
+
 
     /**
      * Returns a list of all MumbleChannel children for a given MumbleChannel

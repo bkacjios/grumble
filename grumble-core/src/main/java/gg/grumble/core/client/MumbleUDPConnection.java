@@ -42,7 +42,6 @@ public class MumbleUDPConnection {
     public void send(byte[] data) throws IOException {
         ByteBuffer buffer = ByteBuffer.wrap(data);
         while(buffer.hasRemaining()) {
-            LOG.info("Writing...");
             channel.write(buffer);
         }
     }

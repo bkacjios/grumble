@@ -8,11 +8,14 @@ import org.junit.jupiter.api.Test;
 
 public class MumbleOCB2Test {
     /**
-     * "Hello world!" should result in these expected values on a REAL mumble client.
+     * Known keys and IV's that result in our "Hello world!" being encoded with expected values.
      */
     private static final String KEY_HEX        = "00112233445566778899aabbccddeeff";
     private static final String CLIENT_IV_HEX  = "202122232425262728292a2b2c2d2e2f";
     private static final String SERVER_IV_HEX  = "101112131415161718191a1b1c1d1e1f";
+    /**
+     * "Hello world!" should result in these expected values on a REAL mumble client.
+     */
     private static final String TEST_MESSAGE   = "Hello world!";
     private static final String EXPECTED_C2S   = "114074199b4e20b7537da596e6060611";
     private static final String EXPECTED_S2C   = "210d0ebfeec286d7ebdb9d1698852515";
@@ -163,7 +166,7 @@ public class MumbleOCB2Test {
         byte[] msg = "Test 123".getBytes();
         byte[] ct  = pair[0].encrypt(msg);
         if (ct.length > 4) {
-            ct[4] ^= 0x80; // flip a bit in the data
+            ct[4] ^= (byte) 0x80; // flip a bit in the data
             assertNull(pair[1].decrypt(ct), "decrypt must return null on bad ciphertext");
         }
     }
