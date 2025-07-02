@@ -148,10 +148,8 @@ public class MumbleClient {
 
     private void connectUdp() {
         try {
-            LOG.info("Connecting to UDP");
             udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
             udpConnection.start();
-            LOG.info("Listening to UDP messages");
         } catch (IOException e) {
             throw new RuntimeException("Failed to create UDP connection", e);
         }
