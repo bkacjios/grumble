@@ -27,19 +27,22 @@ public final class MumbleEvents {
     public record ServerReject(MumbleProto.Reject reject) implements MumbleEvent {
     }
 
-    public record ServerSync(MumbleProto.ServerSync sync) implements MumbleEvent {
+    public record ServerSync(MumbleUser me, MumbleProto.ServerSync sync) implements MumbleEvent {
     }
 
-    public record ChannelRemove(MumbleProto.ChannelRemove remove) implements MumbleEvent {
+    public record ChannelRemove(MumbleChannel channel, MumbleProto.ChannelRemove remove) implements MumbleEvent {
     }
 
-    public record ChannelState(MumbleProto.ChannelState state) implements MumbleEvent {
+    public record ChannelState(MumbleChannel channel, MumbleProto.ChannelState state) implements MumbleEvent {
     }
 
-    public record UserRemove(MumbleProto.UserRemove remove) implements MumbleEvent {
+    public record UserRemove(MumbleUser user, MumbleProto.UserRemove remove) implements MumbleEvent {
     }
 
     public record UserState(MumbleProto.UserState state) implements MumbleEvent {
+    }
+
+    public record UserChangedChannel(MumbleUser user, MumbleChannel from, MumbleChannel to) implements MumbleEvent {
     }
 
     public record BanList(MumbleProto.BanList banList) implements MumbleEvent {

@@ -2,8 +2,7 @@ package gg.grumble.core.client;
 
 import gg.grumble.mumble.MumbleProto;
 
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class MumbleChannel {
 	private final MumbleClient client;
@@ -19,9 +18,7 @@ public class MumbleChannel {
 	private boolean isEnterRestricted;
 	private boolean canEnter;
 
-	private List<Integer> links = Collections.emptyList();
-	private List<Integer> linksAdd = Collections.emptyList();
-	private List<Integer> linksRemove = Collections.emptyList();
+	private final Set<Integer> links = new LinkedHashSet<>();
 
 	public MumbleChannel(MumbleClient client, int channelId) {
 		this.client = client;
@@ -44,15 +41,14 @@ public class MumbleChannel {
 		if (state.hasCanEnter()) this.canEnter = state.getCanEnter();
 
 		if (!state.getLinksList().isEmpty()) {
-			this.links = state.getLinksList();
+			links.clear();
+			links.addAll(state.getLinksList());
 		}
 
-		if (!state.getLinksAddList().isEmpty()) {
-			this.linksAdd = state.getLinksAddList();
-		}
+		links.addAll(state.getLinksAddList());
 
-		if (!state.getLinksRemoveList().isEmpty()) {
-			this.linksRemove = state.getLinksRemoveList();
+		for (int remove : state.getLinksRemoveList()) {
+			links.remove(remove);
 		}
 	}
 
@@ -62,8 +58,12 @@ public class MumbleChannel {
 		return channelId;
 	}
 
-	public Integer getParent() {
+	public Integer getParentId() {
 		return parent;
+	}
+
+	public MumbleChannel getParent() {
+		return client.getChannel(parent);
 	}
 
 	public String getName() {
@@ -98,16 +98,48 @@ public class MumbleChannel {
 		return canEnter;
 	}
 
-	public List<Integer> getLinks() {
+	public Set<Integer> getLinks() {
 		return links;
 	}
 
-	public List<Integer> getLinksAdd() {
-		return linksAdd;
+	public List<MumbleUser> getUsers() {
+		return client.getUsers().stream()
+				.filter(user -> Objects.equals(this.channelId, user.getChannelId()))
+				.toList();
 	}
 
-	public List<Integer> getLinksRemove() {
-		return linksRemove;
+	public List<MumbleChannel> getChildren() {
+		return client.getChildren(this.channelId);
+	}
+
+	@SuppressWarnings("unused")
+	public MumbleChannel resolveRelativePath(String path) {
+		if (path == null || path.isEmpty()) return this;
+
+		String[] parts = path.split("[/\\\\]+"); // supports both / and \
+		MumbleChannel current = this;
+
+		for (String part : parts) {
+			if (part.isEmpty() || part.equals(".")) {
+				continue;
+			} else if (part.equals("..")) {
+				current = current.getParent();
+				if (current == null) return null;
+			} else {
+				// Scan only direct children
+				MumbleChannel found = null;
+				for (MumbleChannel chan : current.getChildren()) {
+					if (Objects.equals(chan.getParentId(), current.getChannelId()) &&
+							part.equals(chan.getName())) {
+						found = chan;
+						break;
+					}
+				}
+				if (found == null) return null;
+				current = found;
+			}
+		}
+		return current;
 	}
 
 	@Override

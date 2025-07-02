@@ -13,7 +13,6 @@ import gg.grumble.mumble.MumbleUDPProto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import club.minnced.opus.util.OpusLibrary;
-import tomp2p.opuswrapper.Opus;
 
 import javax.net.ssl.*;
 import java.io.IOException;
@@ -47,7 +46,7 @@ public class MumbleClient {
 
     private static final int MUMBLE_VERSION_v1 = MUMBLE_VERSION_MAJOR << 16 | MUMBLE_VERSION_MINOR << 8 | MUMBLE_VERSION_PATCH;
     private static final long MUMBLE_VERSION_V2 = ((long) MUMBLE_VERSION_MAJOR << 48)
-            | ((long) MUMBLE_VERSION_MINOR << 32)| ((long) MUMBLE_VERSION_PATCH << 16);
+            | ((long) MUMBLE_VERSION_MINOR << 32) | ((long) MUMBLE_VERSION_PATCH << 16);
 
     private final String hostname;
     private final int port;
@@ -67,9 +66,11 @@ public class MumbleClient {
 
     private final Queue<ByteBuffer> outboundPlaintextQueue = new ArrayDeque<>();
 
-    private MumbleUser me;
+    private MumbleUser self;
+
     private final Map<Integer, MumbleUser> users = new HashMap<>();
     private final Map<Integer, MumbleChannel> channels = new HashMap<>();
+    private final Map<Integer, List<MumbleChannel>> childrenByParent = new HashMap<>();
 
     private boolean synced = false;
 
@@ -132,25 +133,25 @@ public class MumbleClient {
 
     private void onConnected() {
         sendVersion();
-        scheduler.scheduleAtFixedRate(this::pingTcp, PING_PERIOD_SECONDS, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
         fireEvent(new MumbleEvents.Connected());
     }
 
     private void onServerVersion(MumbleProto.Version version) {
         legacyConnection = !version.hasVersionV2();
 
+        String release = version.getRelease();
         if (legacyConnection) {
             int v1 = version.getVersionV1();
             int major = (v1 >> 16) & 0xFF;
             int minor = (v1 >> 8) & 0xFF;
             int patch = v1 & 0xFF;
-            LOG.info("Server Version v1: {}.{}.{}", major, minor, patch);
+            LOG.info("Server Version v1: {}.{}.{} ({})", major, minor, patch, release);
         } else {
             long v2 = version.getVersionV2();
             long major = (v2 >> 48) & 0xFFFF;
             long minor = (v2 >> 32) & 0xFFFF;
             long patch = (v2 >> 16) & 0xFFFF;
-            LOG.info("Server Version v2: {}.{}.{}", major, minor, patch);
+            LOG.info("Server Version v2: {}.{}.{} ({})", major, minor, patch, release);
         }
 
         LOG.info("Server OS: {} ({})", version.getOs(), version.getOsVersion());
@@ -160,6 +161,7 @@ public class MumbleClient {
 
     /**
      * All mumble servers use MumbleProto.Ping for TCP pings.
+     *
      * @param ping The ping data that was sent
      */
     private void onServerPongTcp(MumbleProto.Ping ping) {
@@ -178,6 +180,7 @@ public class MumbleClient {
     /**
      * If the mumble server has a v2 version, the ping message is a MumbleUDPProto.Ping
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
+     *
      * @param ping The ping data that was sent
      */
     private void onServerPongUdpProtobuf(MumbleUDPProto.Ping ping) {
@@ -196,6 +199,7 @@ public class MumbleClient {
     /**
      * If the mumble server only has a v1 version, the ping message is just a MumbleVarInt encoded timestamp
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
+     *
      * @param time Timestamp the ping was sent
      */
     private void onServerPongUdpLegacy(long time) {
@@ -215,36 +219,114 @@ public class MumbleClient {
     }
 
     private void onServerSync(MumbleProto.ServerSync sync) {
-        this.me = users.get(sync.getSession());
+        this.self = users.get(sync.getSession());
         this.synced = true;
 
-        fireEvent(new MumbleEvents.ServerSync(sync));
+        LOG.info("Fully synced with server");
+
+        // Schedule TCP & UDP pings to keep connection alive
+        scheduler.scheduleAtFixedRate(this::pingTcp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
+        if (crypto.isValid()) {
+            scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
+        }
+
+        fireEvent(new MumbleEvents.ServerSync(this.self, sync));
+    }
+
+    /**
+     * A channel is being removed, so remove it from childrenByParent's list of children
+     *
+     * @param child The child channel to be removed
+     */
+    private void removeChildFromParent(MumbleChannel child) {
+        Integer parentId = child.getParentId();
+        if (parentId != null) {
+            List<MumbleChannel> allChildren = childrenByParent.get(parentId);
+            if (allChildren != null) {
+                allChildren.remove(child);
+                if (allChildren.isEmpty()) {
+                    childrenByParent.remove(parentId);
+                }
+            }
+        }
+    }
+
+    /**
+     * Update our childrenByParent to maintain a list of children
+     *
+     * @param channel     Channel we are updating
+     * @param newParentId Channels new parent ID
+     */
+    private void updateChannelParent(MumbleChannel channel, Integer newParentId) {
+        Integer oldParentId = channel.getParentId();
+
+        if (Objects.equals(oldParentId, newParentId)) {
+            return;
+        }
+
+        removeChildFromParent(channel);
+
+        if (newParentId != null) {
+            childrenByParent.computeIfAbsent(newParentId, k -> new ArrayList<>()).add(channel);
+        }
     }
 
     private void onChannelRemove(MumbleProto.ChannelRemove channelRemove) {
-        fireEvent(new MumbleEvents.ChannelRemove(channelRemove));
+        MumbleChannel channel = channels.remove(channelRemove.getChannelId());
+
+        if (channel != null) {
+            removeChildFromParent(channel);
+        }
+
+        fireEvent(new MumbleEvents.ChannelRemove(channel, channelRemove));
     }
 
     private void onChannelState(MumbleProto.ChannelState channelState) {
         int channelId = channelState.getChannelId();
 
+        // Get the MumbleChannel for this channel ID or create a new one
         MumbleChannel channel = channels.computeIfAbsent(channelId, key -> new MumbleChannel(this, channelId));
+
+        if (channelState.hasParent()) {
+            // The parent channel ID state is changing
+            updateChannelParent(channel, channelState.getParent());
+        }
+
+        // Update our MumbleChannel with the current state
         channel.update(channelState);
 
-        fireEvent(new MumbleEvents.ChannelState(channelState));
+        // Only send events after we are synced
+        if (this.synced) fireEvent(new MumbleEvents.ChannelState(channel, channelState));
     }
 
     private void onUserRemove(MumbleProto.UserRemove userRemove) {
-        fireEvent(new MumbleEvents.UserRemove(userRemove));
+        MumbleUser user = users.remove(userRemove.getSession());
+        fireEvent(new MumbleEvents.UserRemove(user, userRemove));
     }
 
     private void onUserState(MumbleProto.UserState userState) {
         int session = userState.getSession();
 
         MumbleUser user = users.computeIfAbsent(session, key -> new MumbleUser(this, session));
+
+        if (this.synced && userState.hasChannelId()) {
+            // We are fully synced and the user is changing channels
+            Integer fromChannelId = user.getChannelId();
+            int toChannelId = userState.getChannelId();
+
+            if (!Objects.equals(fromChannelId, toChannelId)) {
+                MumbleChannel from = getChannel(fromChannelId);
+                MumbleChannel to = getChannel(toChannelId);
+                // Custom event to signal that the user changed their channel
+                fireEvent(new MumbleEvents.UserChangedChannel(user, from, to));
+            }
+        }
+
+        // Update MumbleUser object with our current state
         user.update(userState);
 
-        fireEvent(new MumbleEvents.UserState(userState));
+        // Only send events after we are synced
+        if (this.synced) fireEvent(new MumbleEvents.UserState(userState));
     }
 
     private void onBanList(MumbleProto.BanList banList) {
@@ -363,9 +445,15 @@ public class MumbleClient {
 
         TrustManager[] trustAllCerts = new TrustManager[]{
                 new X509TrustManager() {
-                    public void checkClientTrusted(X509Certificate[] chain, String authType) {}
-                    public void checkServerTrusted(X509Certificate[] chain, String authType) {}
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                    public void checkClientTrusted(X509Certificate[] chain, String authType) {
+                    }
+
+                    public void checkServerTrusted(X509Certificate[] chain, String authType) {
+                    }
+
+                    public X509Certificate[] getAcceptedIssuers() {
+                        return new X509Certificate[0];
+                    }
                 }
         };
 
@@ -628,6 +716,7 @@ public class MumbleClient {
     /**
      * If the mumble server has a v2 version, the audio data comes in a protobuf message
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
+     *
      * @param audio Audio protobuf message
      */
     private void handleProtobufAudio(MumbleUDPProto.Audio audio) {
@@ -639,9 +728,10 @@ public class MumbleClient {
     /**
      * If the mumble server only has a v1 version, the audio data comes in as a raw packet
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
+     *
      * @param target Voice target the audio is for
-     * @param codec Audio codec of the audio data
-     * @param data The data we received
+     * @param codec  Audio codec of the audio data
+     * @param data   The data we received
      */
     private void handleLegacyAudio(byte target, byte codec, ByteBuffer data) {
         long session = MumbleVarInt.readVarInt(data);
@@ -676,7 +766,7 @@ public class MumbleClient {
     public static byte[] shortsToBytes(short[] input) {
         byte[] output = new byte[input.length * 2];
         for (int i = 0; i < input.length; i++) {
-            output[i * 2]     = (byte) (input[i] & 0xFF);         // low byte
+            output[i * 2] = (byte) (input[i] & 0xFF);         // low byte
             output[i * 2 + 1] = (byte) ((input[i] >> 8) & 0xFF);   // high byte
         }
         return output;
@@ -1019,5 +1109,46 @@ public class MumbleClient {
         version.setVersionV1(MUMBLE_VERSION_v1);
         version.setVersionV2(MUMBLE_VERSION_V2);
         send(MumbleMessageType.VERSION, version.build());
+    }
+
+    public List<MumbleUser> getUsers() {
+        return List.copyOf(users.values());
+    }
+
+    public List<MumbleChannel> getChannels() {
+        return List.copyOf(channels.values());
+    }
+
+    public MumbleChannel getChannel(int channelId) {
+        return channels.get(channelId);
+    }
+
+    /**
+     * Returns a list of all MumbleChannel children for a given MumbleChannel
+     *
+     * @param channel MumbleChannel we want the list of children for
+     * @return List of all MumbleChannel children
+     */
+    public List<MumbleChannel> getChildren(MumbleChannel channel) {
+        return getChildren(channel.getChannelId());
+    }
+
+    /**
+     * Returns a list of all MumbleChannel children for a given channelId
+     *
+     * @param channelId Channel ID we want the list of children for
+     * @return List of all MumbleChannel children
+     */
+    public List<MumbleChannel> getChildren(int channelId) {
+        return childrenByParent.get(channelId);
+    }
+
+    /**
+     * Get the MumbleUser object that represents ourselves
+     *
+     * @return My MumbleUser object
+     */
+    public MumbleUser getSelf() {
+        return this.self;
     }
 }

@@ -2,8 +2,7 @@ package gg.grumble.core.client;
 
 import gg.grumble.mumble.MumbleProto;
 
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class MumbleUser {
     private final MumbleClient client;
@@ -29,9 +28,7 @@ public class MumbleUser {
     private byte[] commentHash;
     private byte[] textureHash;
 
-    private List<String> temporaryAccessTokens = Collections.emptyList();
-    private List<Integer> listeningChannelAdd = Collections.emptyList();
-    private List<Integer> listeningChannelRemove = Collections.emptyList();
+    private final Set<Integer> listeningChannels = new LinkedHashSet<>();
 
     public MumbleUser(MumbleClient client, int session) {
         this.client = client;
@@ -63,44 +60,97 @@ public class MumbleUser {
         if (state.hasCommentHash()) this.commentHash = state.getCommentHash().toByteArray();
         if (state.hasTextureHash()) this.textureHash = state.getTextureHash().toByteArray();
 
-        if (!state.getTemporaryAccessTokensList().isEmpty()) {
-            this.temporaryAccessTokens = state.getTemporaryAccessTokensList();
-        }
+        listeningChannels.addAll(state.getListeningChannelAddList());
 
-        if (!state.getListeningChannelAddList().isEmpty()) {
-            this.listeningChannelAdd = state.getListeningChannelAddList();
-        }
-
-        if (!state.getListeningChannelRemoveList().isEmpty()) {
-            this.listeningChannelRemove = state.getListeningChannelRemoveList();
+        for (int remove : state.getListeningChannelRemoveList()) {
+            listeningChannels.remove(remove);
         }
     }
 
-    public MumbleClient getClient() { return client; }
-    public int getSession() { return session; }
-    public Integer getActor() { return actor; }
-    public String getName() { return name; }
-    public int getUserId() { return userId; }
-    public Integer getChannelId() { return channelId; }
+    public MumbleClient getClient() {
+        return client;
+    }
 
-    public boolean isMute() { return mute; }
-    public boolean isDeaf() { return deaf; }
-    public boolean isSuppressed() { return suppressed; }
-    public boolean isSelfMute() { return selfMute; }
-    public boolean isSelfDeaf() { return selfDeaf; }
-    public boolean isPrioritySpeaker() { return prioritySpeaker; }
-    public boolean isRecording() { return recording; }
+    public int getSession() {
+        return session;
+    }
 
-    public String getComment() { return comment; }
-    public String getHash() { return hash; }
+    public Integer getActor() {
+        return actor;
+    }
 
-    public byte[] getTexture() { return texture; }
-    public byte[] getCommentHash() { return commentHash; }
-    public byte[] getTextureHash() { return textureHash; }
+    public String getName() {
+        return name;
+    }
 
-    public List<String> getTemporaryAccessTokens() { return temporaryAccessTokens; }
-    public List<Integer> getListeningChannelAdd() { return listeningChannelAdd; }
-    public List<Integer> getListeningChannelRemove() { return listeningChannelRemove; }
+    public int getUserId() {
+        return userId;
+    }
+
+    public Integer getChannelId() {
+        return channelId;
+    }
+
+    public boolean isMute() {
+        return mute;
+    }
+
+    public boolean isDeaf() {
+        return deaf;
+    }
+
+    public boolean isSuppressed() {
+        return suppressed;
+    }
+
+    public boolean isSelfMute() {
+        return selfMute;
+    }
+
+    public boolean isSelfDeaf() {
+        return selfDeaf;
+    }
+
+    public boolean isPrioritySpeaker() {
+        return prioritySpeaker;
+    }
+
+    public boolean isRecording() {
+        return recording;
+    }
+
+    public String getComment() {
+        return comment;
+    }
+
+    public String getHash() {
+        return hash;
+    }
+
+    public byte[] getTexture() {
+        return texture;
+    }
+
+    public byte[] getCommentHash() {
+        return commentHash;
+    }
+
+    public byte[] getTextureHash() {
+        return textureHash;
+    }
+
+    public List<MumbleChannel> getListeningChannels() {
+        return listeningChannels.stream()
+                .map(client::getChannel)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    public MumbleChannel getChannel() {
+        return client.getChannel(channelId);
+    }
+
+
 
     @Override
     public String toString() {
