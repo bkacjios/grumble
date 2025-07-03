@@ -14,11 +14,7 @@ public class GrumbleController {
 
     public GrumbleController() {
         client = new MumbleClient("pi-two.lan");
-        try {
-            client.connect();
-        } catch (IOException | GeneralSecurityException e) {
-            throw new RuntimeException(e);
-        }
+        client.connect();
         client.addEventListener(MumbleEvents.Connected.class, event -> {
             client.authenticate("Java-BOT");
         });

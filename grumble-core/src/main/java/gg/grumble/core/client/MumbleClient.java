@@ -9,30 +9,19 @@ import gg.grumble.core.enums.MumblePacketTypeLegacy;
 import gg.grumble.core.enums.MumblePacketTypeProtobuf;
 import gg.grumble.core.models.MumbleChannel;
 import gg.grumble.core.models.MumbleUser;
+import gg.grumble.core.net.MumbleTCPConnection;
+import gg.grumble.core.net.MumbleUDPConnection;
 import gg.grumble.core.opus.OpusDecoder;
-import gg.grumble.core.utils.ExceptionUtils;
 import gg.grumble.core.utils.MumbleVarInt;
 import gg.grumble.mumble.MumbleProto;
 import gg.grumble.mumble.MumbleUDPProto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.net.ssl.*;
 import javax.sound.sampled.*;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.channels.CancelledKeyException;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.SocketChannel;
-import java.security.GeneralSecurityException;
-import java.security.KeyStore;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -51,8 +40,6 @@ public class MumbleClient {
 
     private static final int UDP_BUFFER_MAX = 1024;
 
-    private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
-
     private static final float PING_MILLIS = 1e6f;
     private static final int PING_PERIOD_SECONDS = 5;
 
@@ -60,31 +47,24 @@ public class MumbleClient {
     private static final long MUMBLE_VERSION_V2 = ((long) MUMBLE_VERSION_MAJOR << 48)
             | ((long) MUMBLE_VERSION_MINOR << 32) | ((long) MUMBLE_VERSION_PATCH << 16);
 
-    private final String hostname;
-    private final int port;
+    private final MumbleTCPConnection tcpConnection;
+    private final MumbleUDPConnection udpConnection;
 
-    private MumbleUDPConnection udpConnection;
+    private final MumbleOCB2 crypto = new MumbleOCB2();
 
-    private SocketChannel socketChannel;
-    private SSLEngine sslEngine;
-    private Selector selector;
+    private final OpusDecoder opusDecoder;
+    private final SourceDataLine audioOutput;
 
-    private ByteBuffer appInBuffer;
-    private ByteBuffer netInBuffer;
-    private ByteBuffer netOutBuffer;
-
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
 
     private final Map<Class<? extends MumbleEvents.MumbleEvent>, List<MumbleEventListener<?>>> listeners = new HashMap<>();
-
-    private final Queue<ByteBuffer> outboundPlaintextQueue = new ArrayDeque<>();
-
-    private MumbleUser self;
 
     private final Map<Long, MumbleUser> users = new HashMap<>();
     private final Map<Long, MumbleChannel> channels = new HashMap<>();
     private final Map<Long, List<MumbleChannel>> childrenByParent = new HashMap<>();
     private final Map<Long, List<MumbleUser>> usersInChannel = new HashMap<>();
+
+    private MumbleUser self;
 
     private boolean synced = false;
 
@@ -100,29 +80,23 @@ public class MumbleClient {
     private float udpPingAverage = 0;
     private float udpPingDeviation = 0;
 
-    private final MumbleOCB2 crypto = new MumbleOCB2();
-    private final OpusDecoder opusDecoder;
-
-    private final SourceDataLine audioOutput;
-
-    private volatile boolean connected = false;
-
     public MumbleClient(String hostname, int port) {
-        this.hostname = hostname;
-        this.port = port;
-
         try {
             OpusLibrary.loadFromJar();
         } catch (IOException e) {
             throw new RuntimeException("Failed to load opus library", e);
         }
 
-        this.audioOutput = initAudioOutput();
+        this.tcpConnection = new MumbleTCPConnection(hostname, port, this::onConnectedTcp, this::processTcpMessage, this::onDisconnected);
+        this.udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
 
         this.opusDecoder = new OpusDecoder(SAMPLE_RATE, CHANNELS);
+        this.audioOutput = initAudioOutput();
+
+        setVolume(0.25f);
     }
 
-    private void processUdpMessage(SocketAddress socketAddress, byte[] encrypted) {
+    private void processUdpMessage(byte[] encrypted) {
         if (crypto.isInitialized()) {
             byte[] decrypted = crypto.decrypt(encrypted);
             onUdpTunnel(ByteBuffer.wrap(decrypted), true);
@@ -137,6 +111,7 @@ public class MumbleClient {
         listeners.computeIfAbsent(eventType, k -> new ArrayList<>()).add(listener);
     }
 
+    @SuppressWarnings("unused")
     public <T extends MumbleEvents.MumbleEvent> void removeEventListener(Class<T> eventType, MumbleEventListener<T> listener) {
         List<MumbleEventListener<?>> eventListeners = listeners.get(eventType);
         if (eventListeners != null) {
@@ -159,10 +134,9 @@ public class MumbleClient {
 
     private void connectUdp() {
         try {
-            udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
-            udpConnection.start();
+            udpConnection.connect();
         } catch (IOException e) {
-            throw new RuntimeException("Failed to create UDP connection", e);
+            throw new RuntimeException("Failed to connect to UDP server", e);
         }
     }
 
@@ -300,6 +274,33 @@ public class MumbleClient {
         scheduler.scheduleAtFixedRate(this::mixAndPlayAudio, 0, PLAYBACK_DURATION_MS, TimeUnit.MILLISECONDS);
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
+    }
+
+    public boolean setVolume(float volume) {
+        if (volume < 0f || volume > 1f) {
+            throw new IllegalArgumentException("Volume must be between 0.0 and 1.0");
+        }
+
+        if (audioOutput.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+            FloatControl gainControl = (FloatControl) audioOutput.getControl(FloatControl.Type.MASTER_GAIN);
+            float min = gainControl.getMinimum(); // Usually negative dB, like -80.0
+            float max = gainControl.getMaximum(); // Usually 0.0 dB
+
+            // Avoid log(0); treat 0 volume as min
+            float dB;
+            if (volume == 0f) {
+                dB = min;
+            } else {
+                // Logarithmic volume scaling: perceptually linear
+                dB = (float)(Math.log10(volume) * 20.0);
+                // Clamp to range
+                dB = Math.max(min, Math.min(dB, max));
+            }
+
+            gainControl.setValue(dB);
+            return true;
+        }
+        return false;
     }
 
     private void mixAndPlayAudio() {
@@ -538,253 +539,32 @@ public class MumbleClient {
         scheduler.close();
     }
 
-    public void connect() throws IOException, GeneralSecurityException {
-        connectInternal(null);
+    public void connect() {
+        tcpConnection.connect();
     }
 
-    public void connect(String pkcs12File) throws IOException, GeneralSecurityException {
-        connectInternal(pkcs12File);
-    }
+    private void processTcpMessage(int type, byte[] payload) {
+        // Convert typeId to MumbleMessageType enum if you have one
+        MumbleMessageType messageType = MumbleMessageType.fromId(type);
 
-    private void connectInternal(String pkcs12File) throws IOException, GeneralSecurityException {
-        // Open selector and socket channel
-        selector = Selector.open();
-        socketChannel = SocketChannel.open();
-        socketChannel.configureBlocking(false);
-        socketChannel.connect(new InetSocketAddress(hostname, port));
-        socketChannel.register(selector, SelectionKey.OP_CONNECT);
-
-        // Setup SSL context and engine
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-
-        KeyManager[] keyManagers = null;
-        if (pkcs12File != null) {
-            KeyStore keyStore = KeyStore.getInstance("PKCS12");
-            try (InputStream in = getClass().getClassLoader().getResourceAsStream(pkcs12File)) {
-                keyStore.load(in, new char[0]); // empty password
-            }
-
-            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-            kmf.init(keyStore, new char[0]);
-            keyManagers = kmf.getKeyManagers();
-        }
-
-        TrustManager[] trustAllCerts = new TrustManager[]{
-                new X509TrustManager() {
-                    public void checkClientTrusted(X509Certificate[] chain, String authType) {
-                    }
-
-                    public void checkServerTrusted(X509Certificate[] chain, String authType) {
-                    }
-
-                    public X509Certificate[] getAcceptedIssuers() {
-                        return new X509Certificate[0];
-                    }
-                }
-        };
-
-        sslContext.init(keyManagers, trustAllCerts, new SecureRandom());
-
-        sslEngine = sslContext.createSSLEngine(hostname, port);
-        sslEngine.setUseClientMode(true);
-        sslEngine.beginHandshake();
-
-        // Allocate buffers
-        SSLSession session = sslEngine.getSession();
-        appInBuffer = ByteBuffer.allocate(session.getApplicationBufferSize());
-        netInBuffer = ByteBuffer.allocate(session.getPacketBufferSize());
-        netOutBuffer = ByteBuffer.allocate(session.getPacketBufferSize());
-
-        // Start in a new thread
-        new Thread(this::processLoop, "MumbleClient-ProcessThread").start();
-    }
-
-    private void processLoop() {
-        try {
-            while (!Thread.currentThread().isInterrupted()) {
-                selector.select();
-
-                Iterator<SelectionKey> keys = selector.selectedKeys().iterator();
-                while (keys.hasNext()) {
-                    SelectionKey key = keys.next();
-                    keys.remove();
-
-                    if (!key.isValid()) continue;
-
-                    try {
-                        if (key.isConnectable()) {
-                            finishConnect(key);
-                        }
-
-                        if (key.isReadable()) {
-                            readFromChannel(key);
-                        }
-
-                        if (key.isWritable()) {
-                            writeToChannel(key);
-                        }
-                    } catch (CancelledKeyException ignored) {
-                    }
-                }
-            }
-        } catch (IOException e) {
-            LOG.error("Error reading from TCP socket", e);
-            onDisconnected(ExceptionUtils.getRootCause(e).getLocalizedMessage());
-        } finally {
-            try {
-                connected = false;
-                selector.close();
-                socketChannel.close();
-            } catch (IOException ignored) {
-            }
-        }
-    }
-
-    private void finishConnect(SelectionKey key) throws IOException {
-        if (socketChannel.finishConnect()) {
-            key.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-            doHandshake();
-        } else {
-            // Connection failed
-            key.cancel();
-        }
-    }
-
-    private void doHandshake() throws IOException {
-        SSLEngineResult.HandshakeStatus hsStatus = sslEngine.getHandshakeStatus();
-
-        while (hsStatus != SSLEngineResult.HandshakeStatus.FINISHED &&
-                hsStatus != SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING) {
-
-            switch (hsStatus) {
-                case NEED_UNWRAP:
-                    // Wait for data from server, handled in readFromChannel()
-                    return;
-
-                case NEED_WRAP:
-                    netOutBuffer.clear();
-                    SSLEngineResult wrapResult = sslEngine.wrap(EMPTY_BUFFER, netOutBuffer);
-                    netOutBuffer.flip();
-                    while (netOutBuffer.hasRemaining()) {
-                        socketChannel.write(netOutBuffer);
-                    }
-                    hsStatus = wrapResult.getHandshakeStatus();
-                    break;
-
-                case NEED_TASK:
-                    Runnable task;
-                    while ((task = sslEngine.getDelegatedTask()) != null) {
-                        task.run();
-                    }
-                    hsStatus = sslEngine.getHandshakeStatus();
-                    break;
-
-                default:
-                    throw new IllegalStateException("Invalid Handshake Status: " + hsStatus);
-            }
-        }
-
-        if (hsStatus == SSLEngineResult.HandshakeStatus.FINISHED) {
-            connected = true;
-            onConnectedTcp();
-        }
-    }
-
-    private void readFromChannel(SelectionKey key) throws IOException {
-        netInBuffer.clear();
-        int bytesRead = socketChannel.read(netInBuffer);
-        if (bytesRead == -1) {
-            key.cancel();
-            socketChannel.close();
-            onDisconnected("Server closed the connection");
+        if (messageType == null) {
+            LOG.error("Unknown message type: {}", type);
             return;
         }
-        netInBuffer.flip();
 
-        while (netInBuffer.hasRemaining()) {
-            appInBuffer.clear();
-            SSLEngineResult result = sslEngine.unwrap(netInBuffer, appInBuffer);
-            switch (result.getStatus()) {
-                case OK:
-                    appInBuffer.flip();
-                    if (!connected) {
-                        doHandshake();
-                    } else {
-                        processMessage();
-                    }
-                    break;
+        try {
+            if (legacyConnection && messageType.equals(MumbleMessageType.UDP_TUNNEL)) {
+                handleUdpLegacyPacket(ByteBuffer.wrap(payload), false);
+            } else {
+                // Use protobuf parser for the message type
+                MessageLite message = parseProtobufMessage(messageType, payload);
 
-                case BUFFER_UNDERFLOW:
-                    // Need more data; exit and wait for more network input
-                    return;
-
-                case BUFFER_OVERFLOW:
-                    appInBuffer = enlargeApplicationBuffer(appInBuffer);
-                    break;
-
-                case CLOSED:
-                    key.cancel();
-                    socketChannel.close();
-                    return;
+                // Dispatch or handle the message as needed
+                handleMessage(messageType, message);
             }
+        } catch (Exception e) {
+            LOG.error("Failed to handle message of type {}: {}", messageType, e.getMessage());
         }
-
-        netInBuffer.compact();
-    }
-
-    private void processMessage() {
-        appInBuffer.order(ByteOrder.BIG_ENDIAN);
-        while (appInBuffer.remaining() >= 6) { // Minimum header size
-            appInBuffer.mark();
-
-            // Read message type (unsigned short)
-            int typeId = appInBuffer.getShort() & 0xFFFF;
-
-            // Read message length (int)
-            int length = appInBuffer.getInt();
-
-            if (length < 0) {
-                // Invalid length, maybe corrupted data - handle or disconnect
-                LOG.error("Invalid message length: {}", length);
-                onDisconnected("Invalid message length");
-                return;
-            }
-
-            if (appInBuffer.remaining() < length) {
-                // Not enough data yet for full message, reset position and wait for more
-                appInBuffer.reset();
-                break;
-            }
-
-            // Extract protobuf bytes for this message
-            byte[] data = new byte[length];
-            appInBuffer.get(data);
-
-            // Convert typeId to MumbleMessageType enum if you have one
-            MumbleMessageType messageType = MumbleMessageType.fromId(typeId);
-
-            if (messageType == null) {
-                LOG.error("Unknown message type: {}", typeId);
-                continue; // Or handle unknown message
-            }
-
-            try {
-                if (legacyConnection && messageType.equals(MumbleMessageType.UDP_TUNNEL)) {
-                    handleUdpLegacyPacket(ByteBuffer.wrap(data), false);
-                } else {
-                    // Use protobuf parser for the message type
-                    MessageLite message = parseProtobufMessage(messageType, data);
-
-                    // Dispatch or handle the message as needed
-                    handleMessage(messageType, message);
-                }
-            } catch (Exception e) {
-                LOG.error("Failed to handle message of type {}: {}", messageType, e.getMessage());
-            }
-        }
-
-        // Compact buffer to discard processed data and prepare for more reading
-        appInBuffer.compact();
     }
 
     private void onUdpTunnel(ByteBuffer data, boolean udp) {
@@ -1073,72 +853,7 @@ public class MumbleClient {
         return sb.toString().trim();
     }
 
-    private void writeToChannel(SelectionKey key) throws IOException {
-        if (!key.isValid()) {
-            LOG.error("writeToChannel: Key is invalid");
-            return;
-        }
-
-        // Flush leftover encrypted data
-        while (netOutBuffer.hasRemaining()) {
-            int written = socketChannel.write(netOutBuffer);
-            if (written == 0) break;
-        }
-
-        if (netOutBuffer.hasRemaining()) {
-            // Not fully written, keep OP_WRITE interest
-            return;
-        }
-
-        ByteBuffer nextPlaintext;
-        synchronized (this) {
-            nextPlaintext = outboundPlaintextQueue.poll();
-        }
-        if (nextPlaintext == null) {
-            key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
-            return;
-        }
-
-        netOutBuffer.clear();
-        sslEngine.wrap(nextPlaintext, netOutBuffer);
-        netOutBuffer.flip();
-
-        // Write encrypted data fully as above
-        while (netOutBuffer.hasRemaining()) {
-            int written = socketChannel.write(netOutBuffer);
-            if (written == 0) break;
-        }
-
-        if (netOutBuffer.hasRemaining()) {
-            // Partial write, keep OP_WRITE interest
-            return;
-        }
-
-        // If plaintext not fully consumed, requeue
-        if (nextPlaintext.hasRemaining()) {
-            synchronized (this) {
-                outboundPlaintextQueue.add(nextPlaintext);
-            }
-        }
-
-        // Recursively try to send more
-        writeToChannel(key);
-    }
-
-    private ByteBuffer enlargeApplicationBuffer(ByteBuffer buffer) {
-        SSLSession session = sslEngine.getSession();
-        ByteBuffer newBuffer = ByteBuffer.allocate(session.getApplicationBufferSize());
-        buffer.flip();
-        newBuffer.put(buffer);
-        return newBuffer;
-    }
-
     public synchronized void send(MumbleMessageType type, MessageLite message) {
-        if (!connected) {
-            LOG.error("send() called before handshake finished!");
-            return; // Or throw or queue for later, depending on your design
-        }
-
         byte[] protobufBytes = message.toByteArray();
         ByteBuffer framed = frameMessage(type, protobufBytes);
 
@@ -1154,16 +869,7 @@ public class MumbleClient {
             LOG.debug("Sending {}: {}", protoName, toHex(framed));
         }
 
-        outboundPlaintextQueue.offer(framed);
-        enableWriteInterest();
-    }
-
-    private void enableWriteInterest() {
-        SelectionKey key = socketChannel.keyFor(selector);
-        if (key != null && key.isValid()) {
-            key.interestOps(key.interestOps() | SelectionKey.OP_WRITE);
-            selector.wakeup();
-        }
+        tcpConnection.send(framed);
     }
 
     private static ByteBuffer frameMessage(MumbleMessageType type, byte[] protobufBytes) {

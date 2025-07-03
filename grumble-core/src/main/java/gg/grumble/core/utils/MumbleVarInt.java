@@ -2,6 +2,7 @@ package gg.grumble.core.utils;
 
 import java.nio.ByteBuffer;
 
+@SuppressWarnings({"unused", "UnusedReturnValue"})
 public class MumbleVarInt {
     public static int writeVarInt(ByteBuffer buffer, long value) {
         int flag = 0;

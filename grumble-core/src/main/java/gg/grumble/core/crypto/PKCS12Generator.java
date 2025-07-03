@@ -1,4 +1,4 @@
-package gg.grumble.core.client;
+package gg.grumble.core.crypto;
 
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.Extension;

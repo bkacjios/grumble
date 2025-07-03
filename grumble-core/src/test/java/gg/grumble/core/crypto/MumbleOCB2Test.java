@@ -1,6 +1,5 @@
-package gg.grumble.core.client;
+package gg.grumble.core.crypto;
 
-import gg.grumble.core.crypto.MumbleOCB2;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
