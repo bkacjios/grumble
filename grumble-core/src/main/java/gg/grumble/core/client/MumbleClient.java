@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -53,7 +54,7 @@ public class MumbleClient {
 
     private final MumbleOCB2 crypto = new MumbleOCB2();
 
-    private final Map<Long, OpusDecoder> opusDecoders = new HashMap<>();
+    private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
     private final SourceDataLine audioOutput;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -139,14 +140,6 @@ public class MumbleClient {
         }
     }
 
-    private void connectUdp() {
-        try {
-            udpConnection.connect();
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to connect to UDP server", e);
-        }
-    }
-
     private SourceDataLine initAudioOutput() {
         AudioFormat format = new AudioFormat(
                 48000,              // Sample rate
@@ -170,7 +163,6 @@ public class MumbleClient {
 
 
     private void onConnectedTcp() {
-        connectUdp();
         sendVersion();
         fireEvent(new MumbleEvents.Connected());
     }
@@ -276,9 +268,6 @@ public class MumbleClient {
 
         // Schedule TCP & UDP pings to keep connection alive
         scheduler.scheduleAtFixedRate(this::pingTcp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
-        if (crypto.isInitialized()) {
-            scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
-        }
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
     }
@@ -512,6 +501,8 @@ public class MumbleClient {
 
         if (crypto.isInitialized()) {
             LOG.info("Cipher setup: handshake complete");
+            udpConnection.connect();
+            scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
         } else {
             LOG.warn("Cipher setup: handshake failed");
         }
@@ -567,6 +558,8 @@ public class MumbleClient {
         if (messageType == null) {
             LOG.error("Unknown message type: {}", type);
             return;
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug("Received TCP packet {}", messageType);
         }
 
         try {
@@ -580,7 +573,7 @@ public class MumbleClient {
                 handleMessage(messageType, message);
             }
         } catch (Exception e) {
-            LOG.error("Failed to handle message of type {}: {}", messageType, e.getMessage());
+            LOG.error("Failed to handle message of type {}", messageType, e);
         }
     }
 
@@ -689,25 +682,29 @@ public class MumbleClient {
 
     private void decodeOpusAndQueue(long session, byte[] payload, boolean speaking) {
         MumbleUser user = getUser(session);
+        boolean hasUser = (user != null);
 
-        boolean wasSpeaking = user.isSpeaking();
+        boolean wasSpeaking = hasUser && user.isSpeaking();
         boolean oneFrame = (!wasSpeaking && !speaking);
         boolean stateChanged = (wasSpeaking != speaking);
 
-        // Detect speaking transitions
-        if (oneFrame || (stateChanged && speaking)) {
+        if (hasUser && (oneFrame || (stateChanged && speaking))) {
             fireEvent(new MumbleEvents.UserStartSpeaking(user));
         }
 
         OpusDecoder decoder = opusDecoders.computeIfAbsent(session, k -> new OpusDecoder(SAMPLE_RATE, CHANNELS));
-
         int frameSize = decoder.getNbSamples(payload);
         short[] pcm = new short[frameSize * CHANNELS];
         int decodedSamples = decoder.decode(payload, pcm, frameSize);
-        user.pushPcmAudio(pcm, decodedSamples, speaking);
-        fireEvent(new MumbleEvents.UserSpeak(user, pcm));
 
-        if (oneFrame || (stateChanged && !speaking)) {
+        if (hasUser) {
+            user.pushPcmAudio(pcm, decodedSamples, speaking);
+            fireEvent(new MumbleEvents.UserSpeak(user, pcm));
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug("Decoded {} samples for early user session {}", decodedSamples, session);
+        }
+
+        if (hasUser && (oneFrame || (stateChanged && !speaking))) {
             fireEvent(new MumbleEvents.UserStopSpeaking(user));
         }
     }
