@@ -728,6 +728,8 @@ public class MumbleClient {
                     return;
             }
         }
+
+        netInBuffer.compact();
     }
 
     private void processMessage() {
