@@ -38,16 +38,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import static gg.grumble.core.enums.MumbleAudioConfig.*;
+
 public class MumbleClient {
     private static final Logger LOG = LoggerFactory.getLogger(MumbleClient.class);
 
     private static final int UDP_TCP_FALLBACK = 2;
-
-    private static final int SAMPLE_RATE = 48000;
-    private static final int FRAME_DURATION_MS = 20;
-    private static final int CHANNELS = 2;
-    private static final int SAMPLES_PER_FRAME = (SAMPLE_RATE * FRAME_DURATION_MS) / 1000;
-    private static final int SAMPLES_PER_FRAME_TOTAL = SAMPLES_PER_FRAME * CHANNELS;
 
     private static final int MUMBLE_VERSION_MAJOR = 1;
     private static final int MUMBLE_VERSION_MINOR = 5;
@@ -72,7 +68,6 @@ public class MumbleClient {
     private Selector selector;
 
     private ByteBuffer appInBuffer;
-    private ByteBuffer appOutBuffer;
     private ByteBuffer netInBuffer;
     private ByteBuffer netOutBuffer;
 
@@ -242,7 +237,7 @@ public class MumbleClient {
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
      *
      * @param ping The ping data that was sent
-     * @param udp
+     * @param udp Ping came from a UDP socket
      */
     private void onServerPongUdpProtobuf(MumbleUDPProto.Ping ping, boolean udp) {
         updateUdpPing(ping.getTimestamp(), udp);
@@ -254,7 +249,7 @@ public class MumbleClient {
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
      *
      * @param timestamp Timestamp the ping was sent
-     * @param udp
+     * @param udp Ping came from a UDP socket
      */
     private void onServerPongUdpLegacy(long timestamp, boolean udp) {
         fireEvent(new MumbleEvents.ServerPongUdpLegacy(updateUdpPing(timestamp, udp)));
@@ -300,7 +295,7 @@ public class MumbleClient {
         if (crypto.isInitialized()) {
             scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
         }
-        scheduler.scheduleAtFixedRate(this::mixAndPlayAudio, 0, 20, TimeUnit.MILLISECONDS);
+        scheduler.scheduleAtFixedRate(this::mixAndPlayAudio, 0, PLAYBACK_DURATION_MS, TimeUnit.MILLISECONDS);
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
     }
@@ -581,7 +576,6 @@ public class MumbleClient {
         // Allocate buffers
         SSLSession session = sslEngine.getSession();
         appInBuffer = ByteBuffer.allocate(session.getApplicationBufferSize());
-        appOutBuffer = ByteBuffer.allocate(session.getApplicationBufferSize());
         netInBuffer = ByteBuffer.allocate(session.getPacketBufferSize());
         netOutBuffer = ByteBuffer.allocate(session.getPacketBufferSize());
 

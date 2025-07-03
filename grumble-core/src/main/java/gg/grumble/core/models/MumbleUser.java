@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import static gg.grumble.core.enums.MumbleAudioConfig.*;
+
 public class MumbleUser {
     private final MumbleClient client;
     private final long session;
@@ -34,7 +36,7 @@ public class MumbleUser {
 
     private final Set<Integer> listeningChannels = new LinkedHashSet<>();
 
-    private final ShortRingBuffer pcmBuffer = new ShortRingBuffer(48000 * 2);
+    private final ShortRingBuffer pcmBuffer = new ShortRingBuffer(SAMPLE_RATE * CHANNELS, JITTER_THRESHOLD);
 
     public MumbleUser(MumbleClient client, long session) {
         this.client = client;

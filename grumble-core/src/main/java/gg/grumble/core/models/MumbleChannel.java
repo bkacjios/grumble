@@ -107,13 +107,11 @@ public class MumbleChannel {
 	}
 
 	public List<MumbleUser> getUsers() {
-		return client.getUsers().stream()
-				.filter(user -> Objects.equals(this.channelId, user.getChannelId()))
-				.toList();
+		return client.getChannelUsers(channelId);
 	}
 
 	public List<MumbleChannel> getChildren() {
-		return client.getChildren(this.channelId);
+		return client.getChildren(channelId);
 	}
 
 	@SuppressWarnings("unused")
