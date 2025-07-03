@@ -47,6 +47,9 @@ public final class MumbleEvents {
     public record UserState(MumbleProto.UserState state) implements MumbleEvent {
     }
 
+    public record UserConnected(MumbleUser user) implements MumbleEvent {
+    }
+
     public record UserChangedChannel(MumbleUser user, MumbleChannel from, MumbleChannel to) implements MumbleEvent {
     }
 
@@ -90,6 +93,15 @@ public final class MumbleEvents {
     }
 
     public record PluginDataTransmission(MumbleProto.PluginDataTransmission transmission) implements MumbleEvent {
+    }
+
+    public record UserStartSpeaking(MumbleUser user) implements MumbleEvent {
+    }
+
+    public record UserSpeak(MumbleUser user, short[] pcm) implements MumbleEvent {
+    }
+
+    public record UserStopSpeaking(MumbleUser user) implements MumbleEvent {
     }
 }
 

@@ -13,6 +13,7 @@ import gg.grumble.core.net.MumbleTCPConnection;
 import gg.grumble.core.net.MumbleUDPConnection;
 import gg.grumble.core.opus.OpusDecoder;
 import gg.grumble.core.utils.MumbleVarInt;
+import gg.grumble.core.utils.RealTimeFixedRateThread;
 import gg.grumble.mumble.MumbleProto;
 import gg.grumble.mumble.MumbleUDPProto;
 import org.slf4j.Logger;
@@ -52,10 +53,14 @@ public class MumbleClient {
 
     private final MumbleOCB2 crypto = new MumbleOCB2();
 
-    private final OpusDecoder opusDecoder;
+    private final Map<Long, OpusDecoder> opusDecoders = new HashMap<>();
     private final SourceDataLine audioOutput;
 
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final RealTimeFixedRateThread realTimeFixedRateExecutor = new RealTimeFixedRateThread(
+            this::mixAndPlayAudio,
+            20,
+            TimeUnit.MILLISECONDS);
 
     private final Map<Class<? extends MumbleEvents.MumbleEvent>, List<MumbleEventListener<?>>> listeners = new HashMap<>();
 
@@ -90,10 +95,9 @@ public class MumbleClient {
         this.tcpConnection = new MumbleTCPConnection(hostname, port, this::onConnectedTcp, this::processTcpMessage, this::onDisconnected);
         this.udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
 
-        this.opusDecoder = new OpusDecoder(SAMPLE_RATE, CHANNELS);
         this.audioOutput = initAudioOutput();
 
-        setVolume(0.25f);
+        setVolume(0.10f);
     }
 
     private void processUdpMessage(byte[] encrypted) {
@@ -124,6 +128,9 @@ public class MumbleClient {
 
     @SuppressWarnings("unchecked")
     private <T> void fireEvent(T event) {
+        if (LOG.isTraceEnabled()) {
+            LOG.trace("Firing event: {}", event.getClass().getSimpleName());
+        }
         List<MumbleEventListener<?>> eventListeners = listeners.get(event.getClass());
         if (eventListeners != null) {
             for (MumbleEventListener<?> listener : eventListeners) {
@@ -154,6 +161,7 @@ public class MumbleClient {
             SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
             line.open(format);
             line.start();
+            realTimeFixedRateExecutor.start();
             return line;
         } catch (LineUnavailableException e) {
             throw new RuntimeException("Failed to initialize audio output", e);
@@ -213,7 +221,7 @@ public class MumbleClient {
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
      *
      * @param ping The ping data that was sent
-     * @param udp Ping came from a UDP socket
+     * @param udp  Ping came from a UDP socket
      */
     private void onServerPongUdpProtobuf(MumbleUDPProto.Ping ping, boolean udp) {
         updateUdpPing(ping.getTimestamp(), udp);
@@ -225,7 +233,7 @@ public class MumbleClient {
      * See: <a href="https://github.com/mumble-voip/mumble/pull/5837">FIX(client, server): Fix patch versions > 255</a>
      *
      * @param timestamp Timestamp the ping was sent
-     * @param udp Ping came from a UDP socket
+     * @param udp       Ping came from a UDP socket
      */
     private void onServerPongUdpLegacy(long timestamp, boolean udp) {
         fireEvent(new MumbleEvents.ServerPongUdpLegacy(updateUdpPing(timestamp, udp)));
@@ -271,56 +279,61 @@ public class MumbleClient {
         if (crypto.isInitialized()) {
             scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
         }
-        scheduler.scheduleAtFixedRate(this::mixAndPlayAudio, 0, PLAYBACK_DURATION_MS, TimeUnit.MILLISECONDS);
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
     }
 
-    public boolean setVolume(float volume) {
+    public void setVolume(float volume) {
         if (volume < 0f || volume > 1f) {
             throw new IllegalArgumentException("Volume must be between 0.0 and 1.0");
         }
 
-        if (audioOutput.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
-            FloatControl gainControl = (FloatControl) audioOutput.getControl(FloatControl.Type.MASTER_GAIN);
-            float min = gainControl.getMinimum(); // Usually negative dB, like -80.0
-            float max = gainControl.getMaximum(); // Usually 0.0 dB
-
-            // Avoid log(0); treat 0 volume as min
-            float dB;
-            if (volume == 0f) {
-                dB = min;
-            } else {
-                // Logarithmic volume scaling: perceptually linear
-                dB = (float)(Math.log10(volume) * 20.0);
-                // Clamp to range
-                dB = Math.max(min, Math.min(dB, max));
-            }
-
-            gainControl.setValue(dB);
-            return true;
+        if (!audioOutput.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+            throw new IllegalStateException("Audio device does not support gain control");
         }
-        return false;
+
+        FloatControl gainControl = (FloatControl) audioOutput.getControl(FloatControl.Type.MASTER_GAIN);
+        float min = gainControl.getMinimum(); // Usually negative dB, like -80.0
+        float max = gainControl.getMaximum(); // Usually 0.0 dB
+
+        // Avoid log(0); treat 0 volume as min
+        float dB;
+        if (volume == 0f) {
+            dB = min;
+        } else {
+            // Logarithmic volume scaling: perceptually linear
+            dB = (float) (Math.log10(volume) * 20.0);
+            // Clamp to range
+            dB = Math.max(min, Math.min(dB, max));
+        }
+
+        gainControl.setValue(dB);
     }
 
     private void mixAndPlayAudio() {
-        short[] mixBuffer = new short[SAMPLES_PER_FRAME_TOTAL];
+        int[] mixBuffer = new int[SAMPLES_PER_FRAME_TOTAL];
 
         for (MumbleUser user : getUsers()) {
             short[] userBuffer = new short[SAMPLES_PER_FRAME_TOTAL];
-            int samples = user.popPcmAudio(userBuffer, SAMPLES_PER_FRAME_TOTAL);
+            int actualSamples = user.popPcmAudio(userBuffer, SAMPLES_PER_FRAME_TOTAL);
 
-            if (samples < SAMPLES_PER_FRAME_TOTAL) {
-                continue;
-            }
-
-            for (int i = 0; i < samples; i++) {
-                int mixed = mixBuffer[i] + userBuffer[i];
-                mixBuffer[i] = (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, mixed));
+            if (actualSamples > 0) {
+                for (int i = 0; i < SAMPLES_PER_FRAME_TOTAL; i++) {
+                    mixBuffer[i] += userBuffer[i];
+                }
             }
         }
 
-        byte[] audioBytes = shortsToBytes(mixBuffer);
+        short[] finalMix = new short[SAMPLES_PER_FRAME_TOTAL];
+
+        for (int i = 0; i < SAMPLES_PER_FRAME_TOTAL; i++) {
+            int mixed = mixBuffer[i];
+            if (mixed > Short.MAX_VALUE) mixed = Short.MAX_VALUE;
+            else if (mixed < Short.MIN_VALUE) mixed = Short.MIN_VALUE;
+            finalMix[i] = (short) mixed;
+        }
+
+        byte[] audioBytes = shortsToBytes(finalMix);
         audioOutput.write(audioBytes, 0, audioBytes.length);
     }
 
@@ -400,39 +413,38 @@ public class MumbleClient {
         if (this.synced) fireEvent(new MumbleEvents.ChannelState(channel, channelState));
     }
 
-    private void removeUserFromChannel(long channel, MumbleUser user) {
-        List<MumbleUser> oldList = usersInChannel.get(channel);
-        if (oldList != null) {
-            oldList.remove(user);
-            if (oldList.isEmpty()) {
-                usersInChannel.remove(channel);
-            }
-        }
+    private void removeUserFromChannel(MumbleUser user) {
+        long channel = user.getChannelId();
+        usersInChannel.computeIfPresent(channel, (key, list) -> {
+            list.remove(user);
+            return list.isEmpty() ? null : list;
+        });
     }
 
     private void onUserRemove(MumbleProto.UserRemove userRemove) {
         MumbleUser user = users.remove(Integer.toUnsignedLong(userRemove.getSession()));
 
-        long channel = user.getChannelId();
-
-        removeUserFromChannel(channel, user);
-
         fireEvent(new MumbleEvents.UserRemove(user, userRemove));
+
+        removeUserFromChannel(user);
+        opusDecoders.remove(user.getSession());
     }
 
     private void onUserState(MumbleProto.UserState userState) {
         long session = userState.getSession();
 
-        MumbleUser user = users.computeIfAbsent(session, key -> new MumbleUser(this, session));
+        MumbleUser user = users.get(session);
+        boolean connected = false;
+
+        if (user == null) {
+            user = new MumbleUser(this, session);
+            users.put(session, user);
+            connected = true;
+        }
 
         if (userState.hasChannelId()) {
-            long oldChannel = user.getChannelId();
             long newChannel = Integer.toUnsignedLong(userState.getChannelId());
-
-            if (oldChannel != newChannel) {
-                removeUserFromChannel(oldChannel, user);
-            }
-
+            removeUserFromChannel(user);
             usersInChannel.computeIfAbsent(newChannel, k -> new ArrayList<>()).add(user);
         }
 
@@ -453,7 +465,12 @@ public class MumbleClient {
         user.update(userState);
 
         // Only send events after we are synced
-        if (this.synced) fireEvent(new MumbleEvents.UserState(userState));
+        if (this.synced) {
+            if (connected) {
+                fireEvent(new MumbleEvents.UserConnected(user));
+            }
+            fireEvent(new MumbleEvents.UserState(userState));
+        }
     }
 
     private void onBanList(MumbleProto.BanList banList) {
@@ -537,6 +554,7 @@ public class MumbleClient {
     private void onDisconnected(String reason) {
         fireEvent(new MumbleEvents.Disconnected(reason));
         scheduler.close();
+        realTimeFixedRateExecutor.shutdown();
     }
 
     public void connect() {
@@ -544,7 +562,6 @@ public class MumbleClient {
     }
 
     private void processTcpMessage(int type, byte[] payload) {
-        // Convert typeId to MumbleMessageType enum if you have one
         MumbleMessageType messageType = MumbleMessageType.fromId(type);
 
         if (messageType == null) {
@@ -630,6 +647,9 @@ public class MumbleClient {
         long session = audio.getSenderSession();
         long sequence = audio.getFrameNumber();
         boolean speaking = audio.getIsTerminator();
+
+        byte[] payload = audio.getOpusData().toByteArray();
+        decodeOpusAndQueue(session, payload, speaking);
     }
 
     /**
@@ -644,10 +664,8 @@ public class MumbleClient {
         long session = MumbleVarInt.readVarIntLong(data);
         long sequence = MumbleVarInt.readVarIntLong(data);
 
-        MumbleUser user = getUser(session);
-
-        boolean speaking = false;
-        int payloadLen = 0;
+        boolean speaking;
+        int payloadLen;
         if (codec == MumblePacketTypeLegacy.SPEEX || codec == MumblePacketTypeLegacy.CELT_ALPHA || codec == MumblePacketTypeLegacy.CELT_BETA) {
             byte frameHeader = data.get();
             payloadLen = frameHeader & 0x7F;
@@ -655,6 +673,8 @@ public class MumbleClient {
 
             byte[] payload = new byte[payloadLen];
             data.get(payload);
+
+            // Handle SPEEX/CELT?
         } else if (codec == MumblePacketTypeLegacy.OPUS) {
             long frameHeader = MumbleVarInt.readVarIntLong(data);
             payloadLen = Math.toIntExact(frameHeader & 0x1FFF);
@@ -663,11 +683,32 @@ public class MumbleClient {
             byte[] payload = new byte[payloadLen];
             data.get(payload);
 
-            int frameSize = opusDecoder.getNbSamples(payload);
-            short[] pcm = new short[frameSize * CHANNELS];
-            int decodedSamples = opusDecoder.decode(payload, pcm, frameSize);
+            decodeOpusAndQueue(session, payload, speaking);
+        }
+    }
 
-            user.pushPcmAudio(pcm, decodedSamples);
+    private void decodeOpusAndQueue(long session, byte[] payload, boolean speaking) {
+        MumbleUser user = getUser(session);
+
+        boolean wasSpeaking = user.isSpeaking();
+        boolean oneFrame = (!wasSpeaking && !speaking);
+        boolean stateChanged = (wasSpeaking != speaking);
+
+        // Detect speaking transitions
+        if (oneFrame || (stateChanged && speaking)) {
+            fireEvent(new MumbleEvents.UserStartSpeaking(user));
+        }
+
+        OpusDecoder decoder = opusDecoders.computeIfAbsent(session, k -> new OpusDecoder(SAMPLE_RATE, CHANNELS));
+
+        int frameSize = decoder.getNbSamples(payload);
+        short[] pcm = new short[frameSize * CHANNELS];
+        int decodedSamples = decoder.decode(payload, pcm, frameSize);
+        user.pushPcmAudio(pcm, decodedSamples, speaking);
+        fireEvent(new MumbleEvents.UserSpeak(user, pcm));
+
+        if (oneFrame || (stateChanged && !speaking)) {
+            fireEvent(new MumbleEvents.UserStopSpeaking(user));
         }
     }
 

@@ -16,6 +16,7 @@ public class ShortRingBuffer {
 		this.jitterThreshold = jitterThreshold;
 	}
 
+	@SuppressWarnings("UnusedReturnValue")
 	public synchronized int write(short[] src, int offset, int length) {
 		int written = 0;
 		for (int i = 0; i < length; i++) {
@@ -40,21 +41,22 @@ public class ShortRingBuffer {
 	public synchronized int read(short[] dst, int offset, int length) {
 		if (!jitterSatisfied) {
 			Arrays.fill(dst, offset, offset + length, (short) 0);
-			return length; // silence
+			return 0;
 		}
 
-		int read = 0;
-		for (int i = 0; i < length; i++) {
-			if (size == 0) {
-				dst[offset + i] = 0; // pad with silence
-			} else {
-				dst[offset + i] = buffer[readPos];
-				readPos = (readPos + 1) % buffer.length;
-				size--;
-			}
-			read++;
+		int actualRead = Math.min(size, length);
+
+		// Copy available samples
+		for (int i = 0; i < actualRead; i++) {
+			dst[offset + i] = buffer[readPos];
+			readPos = (readPos + 1) % buffer.length;
+			size--;
 		}
-		return read;
+
+		// Pad remaining with silence
+		Arrays.fill(dst, offset + actualRead, offset + length, (short) 0);
+
+		return actualRead;
 	}
 
 	public synchronized int available() {
