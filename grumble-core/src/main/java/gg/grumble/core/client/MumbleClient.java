@@ -51,6 +51,8 @@ public class MumbleClient {
 
     private static final int UDP_BUFFER_MAX = 1024;
 
+    private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
+
     private static final float PING_MILLIS = 1e6f;
     private static final int PING_PERIOD_SECONDS = 5;
 
@@ -319,6 +321,20 @@ public class MumbleClient {
 
         byte[] audioBytes = shortsToBytes(mixBuffer);
         audioOutput.write(audioBytes, 0, audioBytes.length);
+    }
+
+    private final ByteBuffer audioByteBuffer = ByteBuffer.allocateDirect(SAMPLES_PER_FRAME_TOTAL * 2)
+            .order(ByteOrder.LITTLE_ENDIAN);
+
+    public byte[] shortsToBytes(short[] input) {
+        audioByteBuffer.clear();
+        for (short s : input) {
+            audioByteBuffer.putShort(s);
+        }
+        byte[] result = new byte[audioByteBuffer.position()];
+        audioByteBuffer.flip();
+        audioByteBuffer.get(result);
+        return result;
     }
 
     /**
@@ -647,7 +663,7 @@ public class MumbleClient {
 
                 case NEED_WRAP:
                     netOutBuffer.clear();
-                    SSLEngineResult wrapResult = sslEngine.wrap(ByteBuffer.allocate(0), netOutBuffer);
+                    SSLEngineResult wrapResult = sslEngine.wrap(EMPTY_BUFFER, netOutBuffer);
                     netOutBuffer.flip();
                     while (netOutBuffer.hasRemaining()) {
                         socketChannel.write(netOutBuffer);
@@ -873,15 +889,6 @@ public class MumbleClient {
         }
     }
 
-    public static byte[] shortsToBytes(short[] input) {
-        byte[] output = new byte[input.length * 2];
-        for (int i = 0; i < input.length; i++) {
-            output[i * 2] = (byte) (input[i] & 0xFF);         // low byte
-            output[i * 2 + 1] = (byte) ((input[i] >> 8) & 0xFF);   // high byte
-        }
-        return output;
-    }
-
     private void handleMessage(MumbleMessageType messageType, MessageLite message) {
         switch (messageType) {
             case VERSION -> {
@@ -1009,7 +1016,9 @@ public class MumbleClient {
             protoName = message.getClass().getSimpleName();
         }
 
-        LOG.debug("Received {}: {}", protoName, toHex(message.toByteArray()));
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Received {}: {}", protoName, toHex(message.toByteArray()));
+        }
     }
 
     private MessageLite parseProtobufMessage(MumbleMessageType type, byte[] bytes) throws Exception {
@@ -1116,7 +1125,7 @@ public class MumbleClient {
 
     private ByteBuffer enlargeApplicationBuffer(ByteBuffer buffer) {
         SSLSession session = sslEngine.getSession();
-        ByteBuffer newBuffer = ByteBuffer.allocate(session.getApplicationBufferSize() + buffer.position());
+        ByteBuffer newBuffer = ByteBuffer.allocate(session.getApplicationBufferSize());
         buffer.flip();
         newBuffer.put(buffer);
         return newBuffer;
@@ -1139,7 +1148,9 @@ public class MumbleClient {
             protoName = message.getClass().getSimpleName();
         }
 
-        LOG.debug("Sending {}: {}", protoName, toHex(framed));
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Sending {}: {}", protoName, toHex(framed));
+        }
 
         outboundPlaintextQueue.offer(framed);
         enableWriteInterest();
