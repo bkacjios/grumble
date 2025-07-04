@@ -40,7 +40,7 @@ public class MumbleUser {
 
     private final FloatRingBuffer pcmBuffer = new FloatRingBuffer(SAMPLE_RATE * CHANNELS, JITTER_THRESHOLD);
 
-    private boolean autoGainEnabled = true;
+    private boolean autoGainEnabled = false;
     private float manualGain = 1.0f;
 
     public MumbleUser(MumbleClient client, long session) {

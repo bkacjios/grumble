@@ -47,7 +47,7 @@ public final class MumbleEvents {
     public record UserRemove(MumbleUser user, MumbleProto.UserRemove remove) implements MumbleEvent {
     }
 
-    public record UserState(MumbleProto.UserState state) implements MumbleEvent {
+    public record UserState(MumbleUser user, MumbleProto.UserState state) implements MumbleEvent {
     }
 
     public record UserConnected(MumbleUser user) implements MumbleEvent {

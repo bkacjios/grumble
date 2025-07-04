@@ -55,7 +55,7 @@ public class MumbleClient implements Closeable {
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
     private final SourceDataLine audioOutput;
 
-    private final ExecutorService eventExecutor = Executors.newCachedThreadPool();
+    private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final RealTimeFixedRateThread realTimeFixedRateExecutor = new RealTimeFixedRateThread(
             this::mixAndPlayAudio,
@@ -97,7 +97,7 @@ public class MumbleClient implements Closeable {
 
         this.audioOutput = initAudioOutput();
 
-        setVolume(0.50f);
+        setVolume(0.10f);
     }
 
     private void processUdpMessage(byte[] encrypted) {
@@ -405,14 +405,7 @@ public class MumbleClient implements Closeable {
      * @param newParentId Channels new parent ID
      */
     private void updateChannelParent(MumbleChannel channel, long newParentId) {
-        long oldParentId = channel.getParentId();
-
-        if (Objects.equals(oldParentId, newParentId)) {
-            return;
-        }
-
         removeChildFromParent(channel);
-
         childrenByParent.computeIfAbsent(newParentId, k -> new ArrayList<>()).add(channel);
     }
 
@@ -505,7 +498,7 @@ public class MumbleClient implements Closeable {
             if (connected) {
                 fireEvent(new MumbleEvents.UserConnected(user));
             }
-            fireEvent(new MumbleEvents.UserState(userState));
+            fireEvent(new MumbleEvents.UserState(user, userState));
         }
     }
 

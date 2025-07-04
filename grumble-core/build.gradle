@@ -40,7 +40,7 @@ dependencies {
     implementation 'club.minnced:opus-java-natives:1.1.1'
 
     // protobuf
-    implementation 'com.google.protobuf:protobuf-java:4.31.1'
+    api 'com.google.protobuf:protobuf-java:4.31.1'
 
     // OCB-AES128 & PKCS12
     implementation 'org.bouncycastle:bcprov-jdk15on:1.70'

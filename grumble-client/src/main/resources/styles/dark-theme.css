@@ -35,7 +35,7 @@
 .list-view, .table-view, .tree-view {
     -fx-background-color: #3c3f41;
     -fx-control-inner-background: #3c3f41;
-    -fx-cell-hover-color: #4a90e2;
+    -fx-cell-hover-color: #3b4857;
     -fx-text-fill: #ffffff;
 }
 
@@ -43,7 +43,7 @@
     -fx-text-fill: #ffffff;
 }
 .list-cell:selected, .table-row-cell:selected, .tree-cell:selected {
-    -fx-background-color: #4a90e2;
+    -fx-background-color: #3b4857;
     -fx-text-fill: #ffffff;
 }
 
