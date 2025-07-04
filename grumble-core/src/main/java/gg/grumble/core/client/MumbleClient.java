@@ -431,7 +431,7 @@ public class MumbleClient {
             connected = true;
         }
 
-        if (userState.hasChannelId()) {
+        if (userState.hasChannelId() || !synced) {
             long newChannel = Integer.toUnsignedLong(userState.getChannelId());
             removeUserFromChannel(user);
             usersInChannel.computeIfAbsent(newChannel, k -> new ArrayList<>()).add(user);
@@ -1038,7 +1038,7 @@ public class MumbleClient {
      * @return List of all MumbleChannel children
      */
     public List<MumbleChannel> getChildren(long channelId) {
-        return childrenByParent.get(channelId);
+        return childrenByParent.getOrDefault(channelId, Collections.emptyList());
     }
 
     /**
