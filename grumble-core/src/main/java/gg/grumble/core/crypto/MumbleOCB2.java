@@ -21,6 +21,12 @@ public class MumbleOCB2 {
     private final byte[] decryptHistory = new byte[256];
     private boolean initialized = false;
 
+    public static class DecryptException extends Exception {
+        public DecryptException(String message) {
+            super(message);
+        }
+    }
+
     public MumbleOCB2() {
         Arrays.fill(decryptHistory, (byte) -1);
     }
@@ -160,7 +166,7 @@ public class MumbleOCB2 {
 
     }
 
-    public byte[] decrypt(byte[] packet) {
+    public byte[] decrypt(byte[] packet) throws DecryptException {
         byte[] saveIV = Arrays.copyOf(decryptIV, BLOCK_SIZE);
         int lateCount = 0;
         int lostCount = 0;
@@ -168,7 +174,7 @@ public class MumbleOCB2 {
 
         if (packet == null || packet.length < 4) {
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
-            return null;
+            throw new DecryptException("Packet is null or too short to decrypt");
         }
 
         int iv = packet[0] & 0xFF;
@@ -180,30 +186,24 @@ public class MumbleOCB2 {
         else if (diff < -128) diff += 256;
 
         if (diff == 1) {
-            // in-order
             if (iv > cur) {
                 decryptIV[0] = (byte) iv;
             } else {
-                // wrapped BE counter
                 decryptIV[0] = (byte) iv;
                 for (int i = 1; i < BLOCK_SIZE; i++) {
                     if (++decryptIV[i] != 0) break;
                 }
             }
         } else if (diff == 0) {
-            // duplicate =drop
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
-            return null;
+            throw new DecryptException("Duplicate packet (IV already used)");
         } else if (diff < 0) {
-            // either late or lost-with-wrap
             if ((iv < cur) && (diff > -30)) {
-                // late, no wrap
                 lateCount = 1;
                 lostCount = -1;
                 decryptIV[0] = (byte) iv;
                 restore = true;
             } else if ((iv > cur) && (diff > -30)) {
-                // late with wraparound decrement
                 lateCount = 1;
                 lostCount = -1;
                 decryptIV[0] = (byte) iv;
@@ -214,7 +214,6 @@ public class MumbleOCB2 {
                 }
                 restore = true;
             } else {
-                // lost with wrap
                 lostCount = 256 - cur + iv - 1;
                 decryptIV[0] = (byte) iv;
                 for (int i = 1; i < BLOCK_SIZE; i++) {
@@ -222,29 +221,25 @@ public class MumbleOCB2 {
                 }
             }
         } else {
-            // diff > 0 = lost forward
             lostCount = diff - 1;
             decryptIV[0] = (byte) iv;
         }
 
-        // replay protection
         int idx = decryptIV[0] & 0xFF;
         int decVal = decryptIV[1] & 0xFF;
         if (decryptHistory[idx] == (byte) decVal) {
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
-            return null;
+            throw new DecryptException("Replay detected: IV already used at this index");
         }
 
-        // decrypt body…
         byte[] tagBytes = Arrays.copyOfRange(packet, 1, 1 + TAG_TRUNCATED);
         byte[] cipher = Arrays.copyOfRange(packet, 4, packet.length);
         byte[] plain = new byte[cipher.length];
         if (!ocbDecrypt(cipher, cipher.length, decryptIV, plain, tagBytes)) {
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
-            return null;
+            throw new DecryptException("OCB decryption failed: authentication tag mismatch or invalid cipher");
         }
 
-        // update stats
         decryptHistory[idx] = (byte) decVal;
         good++;
         late += lateCount;
@@ -255,7 +250,6 @@ public class MumbleOCB2 {
         }
 
         if (restore) {
-            // roll back IV after a late packet
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
             resync++;
         }

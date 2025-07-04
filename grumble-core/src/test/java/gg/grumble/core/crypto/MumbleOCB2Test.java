@@ -20,7 +20,7 @@ public class MumbleOCB2Test {
     private static final String EXPECTED_S2C   = "210d0ebfeec286d7ebdb9d1698852515";
 
     @Test
-    void testClientToServer() {
+    void testClientToServer() throws MumbleOCB2.DecryptException {
         byte[] key      = hexToBytes(KEY_HEX);
         byte[] clientIV = hexToBytes(CLIENT_IV_HEX);
         byte[] serverIV = hexToBytes(SERVER_IV_HEX);
@@ -44,7 +44,7 @@ public class MumbleOCB2Test {
     }
 
     @Test
-    void testServerToClient() {
+    void testServerToClient() throws MumbleOCB2.DecryptException {
         byte[] key      = hexToBytes(KEY_HEX);
         byte[] clientIV = hexToBytes(CLIENT_IV_HEX);
         byte[] serverIV = hexToBytes(SERVER_IV_HEX);
@@ -95,7 +95,7 @@ public class MumbleOCB2Test {
     }
 
     @Test
-    public void testEmptyPlaintext() {
+    public void testEmptyPlaintext() throws MumbleOCB2.DecryptException {
         var pair = makePair();
         byte[] empty = new byte[0];
         byte[] ct = pair[0].encrypt(empty);
@@ -108,7 +108,7 @@ public class MumbleOCB2Test {
     }
 
     @Test
-    public void testSingleBytePlaintext() {
+    public void testSingleBytePlaintext() throws MumbleOCB2.DecryptException {
         var pair = makePair();
         byte[] one = new byte[]{ (byte)0xAB };
         byte[] ct = pair[0].encrypt(one);
@@ -121,7 +121,7 @@ public class MumbleOCB2Test {
     }
 
     @Test
-    public void testPartialBlocksVariousLengths() {
+    public void testPartialBlocksVariousLengths() throws MumbleOCB2.DecryptException {
         var pair = makePair();
         for (int len : new int[]{ 1, 15, 16, 17, 31, 32, 33 }) {
             byte[] pt = new byte[len];
@@ -135,7 +135,7 @@ public class MumbleOCB2Test {
     }
 
     @Test
-    public void testSequentialMessagesAdvanceIV() {
+    public void testSequentialMessagesAdvanceIV() throws MumbleOCB2.DecryptException {
         var pair = makePair();
         byte[] msg1 = "First message".getBytes();
         byte[] msg2 = "Second message".getBytes();
@@ -151,22 +151,22 @@ public class MumbleOCB2Test {
     }
 
     @Test
-    public void testTagTamperingCausesFailure() {
+    public void testTagTamperingCausesFailure() throws MumbleOCB2.DecryptException {
         var pair = makePair();
         byte[] msg = "Integrity!".getBytes();
         byte[] ct  = pair[0].encrypt(msg);
         ct[1] ^= 1; // flip a bit in the tag
-        assertNull(pair[1].decrypt(ct), "decrypt must return null on bad tag");
+        assertThrows(MumbleOCB2.DecryptException.class, () -> pair[1].decrypt(ct), "decrypt must return null on bad tag");
     }
 
     @Test
-    public void testCiphertextTamperingCausesFailure() {
+    public void testCiphertextTamperingCausesFailure() throws MumbleOCB2.DecryptException {
         var pair = makePair();
         byte[] msg = "Test 123".getBytes();
         byte[] ct  = pair[0].encrypt(msg);
         if (ct.length > 4) {
             ct[4] ^= (byte) 0x80; // flip a bit in the data
-            assertNull(pair[1].decrypt(ct), "decrypt must return null on bad ciphertext");
+            assertThrows(MumbleOCB2.DecryptException.class, () -> pair[1].decrypt(ct), "decrypt must throw on bad ciphertext");
         }
     }
 

@@ -103,8 +103,12 @@ public class MumbleClient {
 
     private void processUdpMessage(byte[] encrypted) {
         if (crypto.isInitialized()) {
-            byte[] decrypted = crypto.decrypt(encrypted);
-            onUdpTunnel(ByteBuffer.wrap(decrypted), true);
+			try {
+                byte[] decrypted = crypto.decrypt(encrypted);
+                onUdpTunnel(ByteBuffer.wrap(decrypted), true);
+			} catch (MumbleOCB2.DecryptException e) {
+				LOG.warn("Unable to decrypt UDP packet: {}", e.getMessage());
+			}
         }
     }
 
