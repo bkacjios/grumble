@@ -43,8 +43,10 @@ public class GrumbleController {
     private Image userIcon;
     private Image userSpeakingIcon;
     private Image userSpeakingMutedIcon;
-    private Image userMuteIcon;
-    private Image userDeafIcon;
+    private Image userSelfMuteIcon;
+    private Image userSelfDeafIcon;
+    private Image userServerMuteIcon;
+    private Image userServerDeafIcon;
 
     public GrumbleController() {
         client = new MumbleClient("pi-two.lan");
@@ -63,12 +65,20 @@ public class GrumbleController {
                 Objects.requireNonNull(getClass().getResource("/icons/talking_muted.png")).toExternalForm(),
                 ICON_SIZE, ICON_SIZE, true, true
         );
-        userMuteIcon = new Image(
+        userSelfMuteIcon = new Image(
                 Objects.requireNonNull(getClass().getResource("/icons/muted_self.png")).toExternalForm(),
                 ICON_SIZE, ICON_SIZE, true, true
         );
-        userDeafIcon = new Image(
+        userSelfDeafIcon = new Image(
                 Objects.requireNonNull(getClass().getResource("/icons/deafened_self.png")).toExternalForm(),
+                ICON_SIZE, ICON_SIZE, true, true
+        );
+        userServerMuteIcon = new Image(
+                Objects.requireNonNull(getClass().getResource("/icons/muted_server.png")).toExternalForm(),
+                ICON_SIZE, ICON_SIZE, true, true
+        );
+        userServerDeafIcon = new Image(
+                Objects.requireNonNull(getClass().getResource("/icons/deafened_server.png")).toExternalForm(),
                 ICON_SIZE, ICON_SIZE, true, true
         );
     }
@@ -77,6 +87,7 @@ public class GrumbleController {
         loadIcons();
 
         client.connect();
+
         client.addEventListener(MumbleEvents.Connected.class, event -> {
             client.authenticate("Java-BOT");
         });
@@ -134,11 +145,15 @@ public class GrumbleController {
             private final ImageView user = new ImageView(userIcon);
             private final ImageView userSpeaking = new ImageView(userSpeakingIcon);
             private final ImageView userSpeakingMuted = new ImageView(userSpeakingMutedIcon);
-            private final ImageView userMuted = new ImageView(userMuteIcon);
-            private final ImageView userDeafened = new ImageView(userDeafIcon);
+            private final ImageView userSelfMute = new ImageView(userSelfMuteIcon);
+            private final ImageView userSelfDeaf = new ImageView(userSelfDeafIcon);
+            private final ImageView userServerMute = new ImageView(userServerMuteIcon);
+            private final ImageView userServerDeaf = new ImageView(userServerDeafIcon);
 
             {
-                Stream.of(user, userSpeaking, userSpeakingMuted, userMuted, userDeafened).forEach(view -> {
+                Stream.of(user, userSpeaking, userSpeakingMuted,
+                        userSelfMute, userSelfDeaf,
+                        userServerDeaf,userServerMute).forEach(view -> {
                     view.setFitWidth(ICON_SIZE);
                     view.setFitHeight(ICON_SIZE);
                 });
@@ -151,10 +166,9 @@ public class GrumbleController {
                         if (item != null && item.getValue() != null) {
                             Object value = item.getValue();
                             if (value instanceof MumbleChannel channel) {
-                                LOG.info("Double-clicked channel: {}", channel.getName());
                                 client.getSelf().moveToChannel(channel);
                             } else if (value instanceof MumbleUserFx userFx) {
-                                LOG.info("Double-clicked user: {}", userFx.getName());
+                                // TODO: Open send message dialog
                             }
                         }
                     }
@@ -172,51 +186,71 @@ public class GrumbleController {
                 }
 
                 if (item instanceof MumbleChannel channel) {
-                    setText(channel.getName());
-                    setGraphic(null);
-                    setContentDisplay(ContentDisplay.LEFT);
+                    updateMumbleChannel(channel);
                 } else if (item instanceof MumbleUserFx userFx) {
-                    // 1) Build a Label bound to the user’s name
-                    Label nameLabel = new Label();
-                    nameLabel.textProperty().bind(userFx.nameProperty());
-
-                    // 2) Speaking icon on the left
-                    ImageView speakView = new ImageView();
-                    speakView.setFitWidth(ICON_SIZE);
-                    speakView.setFitHeight(ICON_SIZE);
-                    speakView.imageProperty().bind(Bindings.createObjectBinding(() -> {
-                        if (userFx.isSpeaking() && userFx.isLocalMute()) {
-                            return userSpeakingMutedIcon;
-                        } else if (userFx.isSpeaking()) {
-                            return userSpeakingIcon;
-                        } else {
-                            return userIcon;
-                        }
-                    }, userFx.speakingProperty(), userFx.localMuteProperty()));
-
-                    // 3) “Spacer” grows to fill the middle
-                    Region spacer = new Region();
-                    HBox.setHgrow(spacer, Priority.ALWAYS);
-
-                    // 4) Mute / Deaf icons on the right
-                    ImageView muteView = new ImageView(userMuteIcon);
-                    muteView.setFitWidth(ICON_SIZE);
-                    muteView.setFitHeight(ICON_SIZE);
-                    muteView.visibleProperty().bind(userFx.selfMuteProperty());
-                    muteView.managedProperty().bind(userFx.selfMuteProperty());
-
-                    ImageView deafView = new ImageView(userDeafIcon);
-                    deafView.setFitWidth(ICON_SIZE);
-                    deafView.setFitHeight(ICON_SIZE);
-                    deafView.visibleProperty().bind(userFx.selfDeafProperty());
-                    deafView.managedProperty().bind(userFx.selfDeafProperty());
-
-                    // 5) Assemble
-                    HBox box = new HBox(4, speakView, nameLabel, spacer, muteView, deafView);
-                    setText(null);
-                    setGraphic(box);
-                    setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+                    updateMumbleUserFx(userFx);
                 }
+            }
+
+            private void updateMumbleChannel(MumbleChannel channel) {
+                setText(channel.getName());
+                setGraphic(null);
+                setContentDisplay(ContentDisplay.LEFT);
+            }
+
+            private void updateMumbleUserFx(MumbleUserFx userFx) {
+                // 1) Build a Label bound to the user’s name
+                Label nameLabel = new Label();
+                nameLabel.textProperty().bind(userFx.nameProperty());
+
+                // 2) Speaking icon on the left
+                ImageView speakView = new ImageView();
+                speakView.setFitWidth(ICON_SIZE);
+                speakView.setFitHeight(ICON_SIZE);
+                speakView.imageProperty().bind(Bindings.createObjectBinding(() -> {
+                    if (userFx.isSpeaking() && userFx.isLocalMute()) {
+                        return userSpeakingMutedIcon;
+                    } else if (userFx.isSpeaking()) {
+                        return userSpeakingIcon;
+                    } else {
+                        return userIcon;
+                    }
+                }, userFx.speakingProperty(), userFx.localMuteProperty()));
+
+                // 3) “Spacer” grows to fill the middle
+                Region spacer = new Region();
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+
+                // 4) Mute / Deaf icons on the right
+                ImageView selfMute = new ImageView(userSelfMuteIcon);
+                selfMute.setFitWidth(ICON_SIZE);
+                selfMute.setFitHeight(ICON_SIZE);
+                selfMute.visibleProperty().bind(userFx.selfMuteProperty());
+                selfMute.managedProperty().bind(userFx.selfMuteProperty());
+
+                ImageView selfDeaf = new ImageView(userSelfDeafIcon);
+                selfDeaf.setFitWidth(ICON_SIZE);
+                selfDeaf.setFitHeight(ICON_SIZE);
+                selfDeaf.visibleProperty().bind(userFx.selfDeafProperty());
+                selfDeaf.managedProperty().bind(userFx.selfDeafProperty());
+
+                ImageView serverMute = new ImageView(userServerMuteIcon);
+                serverMute.setFitWidth(ICON_SIZE);
+                serverMute.setFitHeight(ICON_SIZE);
+                serverMute.visibleProperty().bind(userFx.muteProperty());
+                serverMute.managedProperty().bind(userFx.muteProperty());
+
+                ImageView serverDeaf = new ImageView(userServerDeafIcon);
+                serverDeaf.setFitWidth(ICON_SIZE);
+                serverDeaf.setFitHeight(ICON_SIZE);
+                serverDeaf.visibleProperty().bind(userFx.deafProperty());
+                serverDeaf.managedProperty().bind(userFx.deafProperty());
+
+                // 5) Assemble
+                HBox box = new HBox(4, speakView, nameLabel, spacer, selfMute, selfDeaf, serverMute, serverDeaf);
+                setText(null);
+                setGraphic(box);
+                setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
             }
         });
     }
@@ -241,16 +275,57 @@ public class GrumbleController {
                         .comparingLong(MumbleChannel::getParentId)
                         .thenComparingLong(MumbleChannel::getPosition)
                         .thenComparing(c -> c.getName().toLowerCase()))
-                .forEach(sub -> {
-                    TreeItem<Object> subItem = buildTree(sub);
-                    subItem.setExpanded(true);
-                    children.add(subItem);
-                });
+                .forEach(sub -> children.add(buildTree(sub)));
 
         TreeItem<Object> channelItem = new TreeItem<>(channel);
         channelItem.getChildren().setAll(children);
         channelNodeMap.put(channel, channelItem);
         return channelItem;
+    }
+
+    /**
+     * Expand this node and all of its parent nodes
+     */
+    private void expandPath(TreeItem<?> item) {
+        TreeItem<?> current = item;
+        while (current != null) {
+            current.setExpanded(true);
+            current = current.getParent();
+        }
+    }
+
+    /**
+     * Collapse this node and any parent that has no MumbleUserFx descendants left.
+     */
+    private void collapsePathIfEmpty(TreeItem<?> item) {
+        TreeItem<?> current = item;
+        while (current != null) {
+            boolean hasUser = current.getChildren().stream()
+                    .anyMatch(child -> {
+                        // if child is a user node...
+                        if (child.getValue() instanceof MumbleUserFx) return true;
+                        // or if it’s a channel, but its subtree contains a user
+                        return containsUserDescendant(child);
+                    });
+            if (hasUser) {
+                // once we hit an ancestor that still has someone below, stop collapsing
+                break;
+            }
+            // otherwise collapse and continue up
+            current.setExpanded(false);
+            current = current.getParent();
+        }
+    }
+
+    /**
+     * Recursively check if any descendant of this node is a user.
+     */
+    private boolean containsUserDescendant(TreeItem<?> node) {
+        for (TreeItem<?> child : node.getChildren()) {
+            if (child.getValue() instanceof MumbleUserFx) return true;
+            if (containsUserDescendant(child)) return true;
+        }
+        return false;
     }
 
     // Adds a MumbleUser to MumbleChannel and UI tree in sorted position
@@ -265,6 +340,8 @@ public class GrumbleController {
         userNodeMap.put(user, userItem);
 
         insertSorted(channelItem.getChildren(), userItem, this::mumbleSort);
+
+        expandPath(channelItem);
     }
 
     // Removes MumbleUser from MumbleChannel and UI tree
@@ -284,6 +361,8 @@ public class GrumbleController {
         }
 
         userFxMap.remove(user);
+
+        collapsePathIfEmpty(channelItem);
     }
 
     private void createChannel(MumbleChannel channel) {

@@ -102,12 +102,12 @@ public class MumbleClient implements Closeable {
 
     private void processUdpMessage(byte[] encrypted) {
         if (crypto.isInitialized()) {
-			try {
+            try {
                 byte[] decrypted = crypto.decrypt(encrypted);
                 onUdpTunnel(ByteBuffer.wrap(decrypted), true);
-			} catch (MumbleOCB2.DecryptException e) {
-				LOG.warn("Unable to decrypt UDP packet: {}", e.getMessage());
-			}
+            } catch (MumbleOCB2.DecryptException e) {
+                LOG.warn("Unable to decrypt UDP packet: {}", e.getMessage());
+            }
         }
     }
 
@@ -316,33 +316,61 @@ public class MumbleClient implements Closeable {
     /**
      * Mix all users speaking audio into a single buffer write it to audio output
      */
+    private static final int MAX_PLC = 3;
+    private final Map<Long, Integer> plcCount = new HashMap<>();
+    private static final byte[] EMPTY_BYTES = new byte[0];
+
     private void mixAndPlayAudio() {
-        float[] mixBuffer = new float[SAMPLES_PER_FRAME_TOTAL];
+        float[] mix = new float[SAMPLES_PER_FRAME_TOTAL];
+        float[] buf = new float[SAMPLES_PER_FRAME_TOTAL];
 
-        for (MumbleUser user : getUsers()) {
-            float[] userBuffer = new float[SAMPLES_PER_FRAME_TOTAL];
-            int actualSamples = user.popPcmAudio(userBuffer, SAMPLES_PER_FRAME_TOTAL);
+        for (MumbleUser u : getUsers()) {
+            long id = u.getSession();
+            boolean was = u.isSpeaking();
+            boolean next = false;
 
-            if (actualSamples > 0) {
-                float gain = user.isAutoGainEnabled()
-                        ? computeAutoGain(userBuffer, actualSamples)
-                        : user.getManualGain();
+            // Try real audio
+            int samples = u.popPcmAudio(buf, SAMPLES_PER_FRAME_TOTAL);
+            if (samples > 0) {
+                plcCount.remove(id);
+                next = true;
+            }
+            // Try PLC
+            else if (u.isTransmitting() && plcCount.getOrDefault(id, 0) < MAX_PLC) {
+                samples = opusDecoders.get(id)
+                        .decodeFloat(EMPTY_BYTES, buf, SAMPLES_PER_FRAME);
+                plcCount.merge(id, 1, Integer::sum);
+                if (samples > 0) next = true;
+            }
 
-                for (int i = 0; i < SAMPLES_PER_FRAME_TOTAL; i++) {
-                    mixBuffer[i] += userBuffer[i] * gain;
+            u.setSpeaking(next);
+
+            // Single start/stop fire
+            if (!was && next) {
+                fireEvent(new MumbleEvents.UserStartSpeaking(u));
+            } else if (was && !next) {
+                fireEvent(new MumbleEvents.UserStopSpeaking(u));
+            }
+
+            // Mix & speak‐event when we have actual samples
+            if (next) {
+                float gain = u.isAutoGainEnabled()
+                        ? computeAutoGain(buf, samples)
+                        : u.getManualGain();
+                for (int i = 0; i < samples; i++) {
+                    mix[i] += buf[i] * gain;
                 }
+                fireEvent(new MumbleEvents.UserSpeak(u, Arrays.copyOf(buf, samples)));
             }
         }
 
-        short[] finalMix = new short[SAMPLES_PER_FRAME_TOTAL];
-        for (int i = 0; i < SAMPLES_PER_FRAME_TOTAL; i++) {
-            float limited = softLimit(mixBuffer[i]);
-            limited = Math.max(-1.0f, Math.min(1.0f, limited));
-            finalMix[i] = (short) (limited * 32767.0f);
+        // Write out final mix to sound device
+        short[] out = new short[SAMPLES_PER_FRAME_TOTAL];
+        for (int i = 0; i < out.length; i++) {
+            float x = softLimit(mix[i]);
+            out[i] = (short) (Math.max(-1f, Math.min(1f, x)) * 32767f);
         }
-
-        byte[] audioBytes = shortsToBytes(finalMix);
-        audioOutput.write(audioBytes, 0, audioBytes.length);
+        audioOutput.write(shortsToBytes(out), 0, out.length * 2);
     }
 
     private float computeAutoGain(float[] pcm, int samples) {
@@ -706,12 +734,12 @@ public class MumbleClient implements Closeable {
         long session = MumbleVarInt.readVarIntLong(data);
         long sequence = MumbleVarInt.readVarIntLong(data);
 
-        boolean speaking;
+        boolean transmitting;
         int payloadLen;
         if (codec == MumblePacketTypeLegacy.SPEEX || codec == MumblePacketTypeLegacy.CELT_ALPHA || codec == MumblePacketTypeLegacy.CELT_BETA) {
             byte frameHeader = data.get();
             payloadLen = frameHeader & 0x7F;
-            speaking = ((frameHeader & 0x80) == 0);
+            transmitting = ((frameHeader & 0x80) == 0);
 
             byte[] payload = new byte[payloadLen];
             data.get(payload);
@@ -720,26 +748,18 @@ public class MumbleClient implements Closeable {
         } else if (codec == MumblePacketTypeLegacy.OPUS) {
             long frameHeader = MumbleVarInt.readVarIntLong(data);
             payloadLen = Math.toIntExact(frameHeader & 0x1FFF);
-            speaking = ((frameHeader & 0x2000) == 0);
+            transmitting = ((frameHeader & 0x2000) == 0);
 
             byte[] payload = new byte[payloadLen];
             data.get(payload);
 
-            decodeOpusAndQueue(session, payload, speaking);
+            decodeOpusAndQueue(session, payload, transmitting);
         }
     }
 
-    private void decodeOpusAndQueue(long session, byte[] payload, boolean speaking) {
+    private void decodeOpusAndQueue(long session, byte[] payload, boolean transmitting) {
         MumbleUser user = getUser(session);
         boolean hasUser = (user != null);
-
-        boolean wasSpeaking = hasUser && user.isSpeaking();
-        boolean oneFrame = (!wasSpeaking && !speaking);
-        boolean stateChanged = (wasSpeaking != speaking);
-
-        if (hasUser && (oneFrame || (stateChanged && speaking))) {
-            fireEvent(new MumbleEvents.UserStartSpeaking(user));
-        }
 
         OpusDecoder decoder = opusDecoders.computeIfAbsent(session, k -> new OpusDecoder(SAMPLE_RATE, CHANNELS));
         int frameSize = decoder.getNbSamples(payload);
@@ -747,14 +767,9 @@ public class MumbleClient implements Closeable {
         int decodedSamples = decoder.decodeFloat(payload, pcm, frameSize);
 
         if (hasUser) {
-            user.pushPcmAudio(pcm, decodedSamples, speaking);
-            fireEvent(new MumbleEvents.UserSpeak(user, pcm));
+            user.pushPcmAudio(pcm, decodedSamples, transmitting);
         } else if (LOG.isDebugEnabled()) {
             LOG.debug("Decoded {} samples for early user session {}", decodedSamples, session);
-        }
-
-        if (hasUser && (oneFrame || (stateChanged && !speaking))) {
-            fireEvent(new MumbleEvents.UserStopSpeaking(user));
         }
     }
 

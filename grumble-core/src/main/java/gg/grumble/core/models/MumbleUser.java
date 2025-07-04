@@ -28,6 +28,7 @@ public class MumbleUser {
     private boolean prioritySpeaker;
     private boolean recording;
     private boolean speaking;
+    private boolean transmitting;
 
     private String comment;
     private String hash;
@@ -131,8 +132,20 @@ public class MumbleUser {
         return recording;
     }
 
+    public void setSpeaking(boolean speaking) {
+        this.speaking = speaking;
+    }
+
     public boolean isSpeaking() {
         return speaking;
+    }
+
+    public void setTransmitting(boolean b) {
+        this.transmitting = b;
+    }
+
+    public boolean isTransmitting() {
+        return transmitting;
     }
 
     public String getComment() {
@@ -166,8 +179,8 @@ public class MumbleUser {
         return client.getChannel(channelId);
     }
 
-    public void pushPcmAudio(float[] decodedPcm, int sampleCount, boolean speaking) {
-        this.speaking = speaking;
+    public void pushPcmAudio(float[] decodedPcm, int sampleCount, boolean transmitting) {
+        this.transmitting = transmitting;
         pcmBuffer.write(decodedPcm, 0, sampleCount);
     }
 

@@ -87,7 +87,6 @@ public class MumbleUDPConnection implements Closeable {
                 if (!running) break;
 
                 if (readyChannels == 0) {
-                    LOG.warn("Selector woke up, but no channels are ready");
                     continue;
                 }
 
