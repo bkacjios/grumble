@@ -2,7 +2,7 @@ package gg.grumble.core.models;
 
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.enums.MumbleMessageType;
-import gg.grumble.core.utils.ShortRingBuffer;
+import gg.grumble.core.utils.FloatRingBuffer;
 import gg.grumble.mumble.MumbleProto;
 
 import java.util.LinkedHashSet;
@@ -38,7 +38,10 @@ public class MumbleUser {
 
     private final Set<Integer> listeningChannels = new LinkedHashSet<>();
 
-    private final ShortRingBuffer pcmBuffer = new ShortRingBuffer(SAMPLE_RATE * CHANNELS, JITTER_THRESHOLD);
+    private final FloatRingBuffer pcmBuffer = new FloatRingBuffer(SAMPLE_RATE * CHANNELS, JITTER_THRESHOLD);
+
+    private boolean autoGainEnabled = true;
+    private float manualGain = 1.0f;
 
     public MumbleUser(MumbleClient client, long session) {
         this.client = client;
@@ -163,12 +166,12 @@ public class MumbleUser {
         return client.getChannel(channelId);
     }
 
-    public void pushPcmAudio(short[] decodedPcm, int sampleCount, boolean speaking) {
+    public void pushPcmAudio(float[] decodedPcm, int sampleCount, boolean speaking) {
         this.speaking = speaking;
         pcmBuffer.write(decodedPcm, 0, sampleCount);
     }
 
-    public int popPcmAudio(short[] out, int maxSamples) {
+    public int popPcmAudio(float[] out, int maxSamples) {
         return pcmBuffer.read(out, 0, maxSamples);
     }
 
@@ -178,6 +181,22 @@ public class MumbleUser {
         user.setSession((int) session);
         user.setChannelId((int) channel.getChannelId());
         client.send(MumbleMessageType.USER_STATE, user.build());
+    }
+
+    public boolean isAutoGainEnabled() {
+        return autoGainEnabled;
+    }
+
+    public void setAutoGainEnabled(boolean autoGainEnabled) {
+        this.autoGainEnabled = autoGainEnabled;
+    }
+
+    public float getManualGain() {
+        return manualGain;
+    }
+
+    public void setManualGain(float manualGain) {
+        this.manualGain = manualGain;
     }
 
     @Override

@@ -101,7 +101,7 @@ public final class MumbleEvents {
     public record UserStartSpeaking(MumbleUser user) implements MumbleEvent {
     }
 
-    public record UserSpeak(MumbleUser user, short[] pcm) implements MumbleEvent {
+    public record UserSpeak(MumbleUser user, float[] pcm) implements MumbleEvent {
     }
 
     public record UserStopSpeaking(MumbleUser user) implements MumbleEvent {

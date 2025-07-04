@@ -97,7 +97,7 @@ public class MumbleClient implements Closeable {
 
         this.audioOutput = initAudioOutput();
 
-        setVolume(0.10f);
+        setVolume(0.50f);
     }
 
     private void processUdpMessage(byte[] encrypted) {
@@ -317,30 +317,55 @@ public class MumbleClient implements Closeable {
      * Mix all users speaking audio into a single buffer write it to audio output
      */
     private void mixAndPlayAudio() {
-        int[] mixBuffer = new int[SAMPLES_PER_FRAME_TOTAL];
+        float[] mixBuffer = new float[SAMPLES_PER_FRAME_TOTAL];
 
         for (MumbleUser user : getUsers()) {
-            short[] userBuffer = new short[SAMPLES_PER_FRAME_TOTAL];
+            float[] userBuffer = new float[SAMPLES_PER_FRAME_TOTAL];
             int actualSamples = user.popPcmAudio(userBuffer, SAMPLES_PER_FRAME_TOTAL);
 
             if (actualSamples > 0) {
+                float gain = user.isAutoGainEnabled()
+                        ? computeAutoGain(userBuffer, actualSamples)
+                        : user.getManualGain();
+
                 for (int i = 0; i < SAMPLES_PER_FRAME_TOTAL; i++) {
-                    mixBuffer[i] += userBuffer[i];
+                    mixBuffer[i] += userBuffer[i] * gain;
                 }
             }
         }
 
         short[] finalMix = new short[SAMPLES_PER_FRAME_TOTAL];
-
         for (int i = 0; i < SAMPLES_PER_FRAME_TOTAL; i++) {
-            int mixed = mixBuffer[i];
-            if (mixed > Short.MAX_VALUE) mixed = Short.MAX_VALUE;
-            else if (mixed < Short.MIN_VALUE) mixed = Short.MIN_VALUE;
-            finalMix[i] = (short) mixed;
+            float limited = softLimit(mixBuffer[i]);
+            limited = Math.max(-1.0f, Math.min(1.0f, limited));
+            finalMix[i] = (short) (limited * 32767.0f);
         }
 
         byte[] audioBytes = shortsToBytes(finalMix);
         audioOutput.write(audioBytes, 0, audioBytes.length);
+    }
+
+    private float computeAutoGain(float[] pcm, int samples) {
+        float sum = 0.0f;
+        for (int i = 0; i < samples; i++) {
+            sum += pcm[i] * pcm[i];
+        }
+
+        float rms = (float) Math.sqrt(sum / samples);
+
+        final float targetRms = 0.2f;
+        final float maxGain = 3.0f;
+
+        if (rms < 1e-6f) return maxGain;
+
+        float gain = targetRms / rms;
+        return Math.min(gain, maxGain);
+    }
+
+    private float softLimit(float x) {
+        float abs = Math.abs(x);
+        if (abs < 1.0f) return x;
+        return Math.signum(x) * (1.0f - 1.0f / (abs + 1.0f));
     }
 
     private final ByteBuffer audioByteBuffer = ByteBuffer.allocateDirect(SAMPLES_PER_FRAME_TOTAL * 2)
@@ -725,8 +750,8 @@ public class MumbleClient implements Closeable {
 
         OpusDecoder decoder = opusDecoders.computeIfAbsent(session, k -> new OpusDecoder(SAMPLE_RATE, CHANNELS));
         int frameSize = decoder.getNbSamples(payload);
-        short[] pcm = new short[frameSize * CHANNELS];
-        int decodedSamples = decoder.decode(payload, pcm, frameSize);
+        float[] pcm = new float[frameSize * CHANNELS];
+        int decodedSamples = decoder.decodeFloat(payload, pcm, frameSize);
 
         if (hasUser) {
             user.pushPcmAudio(pcm, decodedSamples, speaking);

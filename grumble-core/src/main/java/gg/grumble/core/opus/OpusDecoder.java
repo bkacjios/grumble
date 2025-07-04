@@ -3,6 +3,7 @@ package gg.grumble.core.opus;
 import com.sun.jna.ptr.PointerByReference;
 import tomp2p.opuswrapper.Opus;
 
+import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
 
 public class OpusDecoder {
@@ -21,19 +22,31 @@ public class OpusDecoder {
         this.decoder = dec;
     }
 
-    public int decode(byte[] data, short[] pcm, int frameSize) {
-        return decode(data, pcm, frameSize, false);
+    public int decode(byte[] encoded, short[] pcm, int frameSize) {
+        return decode(encoded, pcm, frameSize, false);
     }
 
-    public int decode(byte[] data, short[] pcm, int frameSize, boolean fec) {
+    public int decode(byte[] encoded, short[] pcm, int frameSize, boolean fec) {
         ShortBuffer pcmBuf = ShortBuffer.wrap(pcm);
-        int result = Opus.INSTANCE.opus_decode(decoder, data, data.length, pcmBuf, frameSize, fec ? 1 : 0);
+        int result = Opus.INSTANCE.opus_decode(decoder, encoded, encoded.length, pcmBuf, frameSize, fec ? 1 : 0);
         if (result < 0) {
             throw new OpusException("Decoding failed: " + Opus.INSTANCE.opus_strerror(result));
         }
         return result * channels;
     }
 
+    public int decodeFloat(byte[] encoded, float[] pcm, int frameSize) {
+        return decodeFloat(encoded, pcm, frameSize, false);
+    }
+
+    public int decodeFloat(byte[] encoded, float[] pcm, int frameSize, boolean fec) {
+        FloatBuffer pcmBuf = FloatBuffer.wrap(pcm);
+        int result = Opus.INSTANCE.opus_decode_float(decoder, encoded, encoded.length, pcmBuf, frameSize, fec ? 1 : 0);
+        if (result < 0) {
+            throw new OpusException("Decoding failed: " + Opus.INSTANCE.opus_strerror(result));
+        }
+        return result * channels;
+    }
 
     /**
      * Wrap opus_decoder_get_nb_samples to query the number of samples in a packet.
