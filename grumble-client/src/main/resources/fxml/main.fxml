@@ -5,14 +5,78 @@
 
 <AnchorPane prefHeight="400.0" prefWidth="600.0" stylesheets="@../styles/dark-theme.css" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="gg.grumble.client.controllers.GrumbleController">
    <children>
-      <StackPane AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+      <VBox>
          <children>
-            <SplitPane dividerPositions="0.5">
+            <MenuBar>
+              <menus>
+                <Menu mnemonicParsing="false" text="Server">
+                  <items>
+                    <MenuItem mnemonicParsing="false" text="Connect" />
+                    <SeparatorMenuItem />
+                    <MenuItem mnemonicParsing="false" text="Disconnect" />
+                    <MenuItem mnemonicParsing="false" text="Information" />
+                    <MenuItem mnemonicParsing="false" text="Search" />
+                    <MenuItem mnemonicParsing="false" text="Access Tokens" />
+                    <MenuItem mnemonicParsing="false" text="Registered Users" />
+                    <MenuItem mnemonicParsing="false" text="Ban List" />
+                    <SeparatorMenuItem />
+                    <MenuItem mnemonicParsing="false" text="Hide Mumble" />
+                    <MenuItem mnemonicParsing="false" text="Quit" />
+                  </items>
+                </Menu>
+                <Menu mnemonicParsing="false" text="Self">
+                  <items>
+                    <MenuItem mnemonicParsing="false" text="Mute Self" />
+                    <MenuItem mnemonicParsing="false" text="Deafen Self" />
+                    <MenuItem mnemonicParsing="false" text="Priority Speaker" />
+                     <SeparatorMenuItem />
+                    <MenuItem mnemonicParsing="false" text="Record..." />
+                     <SeparatorMenuItem />
+                     <MenuItem mnemonicParsing="false" text="Change Comment..." />
+                     <MenuItem mnemonicParsing="false" text="Change Avatar..." />
+                     <MenuItem mnemonicParsing="false" text="Remove Avatar" />
+                     <SeparatorMenuItem />
+                     <MenuItem mnemonicParsing="false" text="Register..." />
+                     <MenuItem mnemonicParsing="false" text="Audio Statistics" />
+                  </items>
+                </Menu>
+                 <Menu mnemonicParsing="false" text="Configure">
+                    <items>
+                       <MenuItem mnemonicParsing="false" text="Settings" />
+                       <MenuItem mnemonicParsing="false" text="Audio Wizard..." />
+                       <MenuItem mnemonicParsing="false" text="Certificate Wizard..." />
+                       <SeparatorMenuItem />
+                       <MenuItem mnemonicParsing="false" text="Text-To-Speech" />
+                       <SeparatorMenuItem />
+                       <MenuItem mnemonicParsing="false" text="Minimal View" />
+                       <MenuItem mnemonicParsing="false" text="Channel Filter" />
+                       <MenuItem mnemonicParsing="false" text="Talking UI" />
+                    </items>
+                 </Menu>
+                 <Menu mnemonicParsing="false" text="Help">
+                    <items>
+                       <MenuItem mnemonicParsing="false" text="What's This?" />
+                       <SeparatorMenuItem />
+                       <MenuItem mnemonicParsing="false" text="About" />
+                       <MenuItem mnemonicParsing="false" text="About JavaFX" />
+                       <SeparatorMenuItem />
+                       <MenuItem mnemonicParsing="false" text="Check for Updates" />
+                    </items>
+                 </Menu>
+              </menus>
+            </MenuBar>
+            <SplitPane dividerPositions="0.4">
                <items>
+                  <VBox>
+                     <children>
+                        <VBox VBox.vgrow="ALWAYS" />
+                        <TextArea prefHeight="55.0" />
+                     </children>
+                  </VBox>
                   <TreeView fx:id="mumbleTree" />
-                  <VBox />
-               </items></SplitPane>
+               </items>
+            </SplitPane>
          </children>
-      </StackPane>
+      </VBox>
    </children>
 </AnchorPane>

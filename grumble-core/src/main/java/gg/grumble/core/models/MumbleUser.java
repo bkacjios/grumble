@@ -1,6 +1,7 @@
 package gg.grumble.core.models;
 
 import gg.grumble.core.client.MumbleClient;
+import gg.grumble.core.enums.MumbleMessageType;
 import gg.grumble.core.utils.ShortRingBuffer;
 import gg.grumble.mumble.MumbleProto;
 
@@ -169,6 +170,14 @@ public class MumbleUser {
 
     public int popPcmAudio(short[] out, int maxSamples) {
         return pcmBuffer.read(out, 0, maxSamples);
+    }
+
+    public void moveToChannel(MumbleChannel channel) {
+        if (channel == getChannel()) return;
+        MumbleProto.UserState.Builder user = MumbleProto.UserState.newBuilder();
+        user.setSession((int) session);
+        user.setChannelId((int) channel.getChannelId());
+        client.send(MumbleMessageType.USER_STATE, user.build());
     }
 
     @Override

@@ -20,18 +20,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.sound.sampled.*;
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import static gg.grumble.core.enums.MumbleAudioConfig.*;
 
-public class MumbleClient {
+public class MumbleClient implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(MumbleClient.class);
 
     private static final int UDP_TCP_FALLBACK = 2;
@@ -57,6 +55,7 @@ public class MumbleClient {
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
     private final SourceDataLine audioOutput;
 
+    private final ExecutorService eventExecutor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final RealTimeFixedRateThread realTimeFixedRateExecutor = new RealTimeFixedRateThread(
             this::mixAndPlayAudio,
@@ -136,10 +135,21 @@ public class MumbleClient {
         if (LOG.isTraceEnabled()) {
             LOG.trace("Firing event: {}", event.getClass().getSimpleName());
         }
+
         List<MumbleEventListener<?>> eventListeners = listeners.get(event.getClass());
         if (eventListeners != null) {
             for (MumbleEventListener<?> listener : eventListeners) {
-                ((MumbleEventListener<T>) listener).onEvent(event);
+                eventExecutor.submit(() -> {
+                    try {
+                        ((MumbleEventListener<T>) listener).onEvent(event);
+                    } catch (Exception e) {
+                        if (!(event instanceof MumbleEvents.EventException)) {
+                            fireEvent(new MumbleEvents.EventException((MumbleEvents.MumbleEvent) event, e));
+                        } else {
+                            LOG.warn("Exception in EventException handler", e);
+                        }
+                    }
+                });
             }
         }
     }
@@ -303,6 +313,9 @@ public class MumbleClient {
         gainControl.setValue(dB);
     }
 
+    /**
+     * Mix all users speaking audio into a single buffer write it to audio output
+     */
     private void mixAndPlayAudio() {
         int[] mixBuffer = new int[SAMPLES_PER_FRAME_TOTAL];
 
@@ -391,19 +404,24 @@ public class MumbleClient {
     private void onChannelState(MumbleProto.ChannelState channelState) {
         long channelId = Integer.toUnsignedLong(channelState.getChannelId());
 
-        // Get the MumbleChannel for this channel ID or create a new one
+        // Check if the channel already exists
+        boolean isNew = !channels.containsKey(channelId);
+
+        // Get or create the channel
         MumbleChannel channel = channels.computeIfAbsent(channelId, key -> new MumbleChannel(this, channelId));
 
         if (channelState.hasParent()) {
-            // The parent channel ID state is changing
             updateChannelParent(channel, channelState.getParent());
         }
 
-        // Update our MumbleChannel with the current state
         channel.update(channelState);
 
-        // Only send events after we are synced
-        if (this.synced) fireEvent(new MumbleEvents.ChannelState(channel, channelState));
+        if (this.synced) {
+            if (isNew) {
+                fireEvent(new MumbleEvents.ChannelCreated(channel));
+            }
+            fireEvent(new MumbleEvents.ChannelState(channel, channelState));
+        }
     }
 
     private void removeUserFromChannel(MumbleUser user) {
@@ -550,6 +568,15 @@ public class MumbleClient {
         fireEvent(new MumbleEvents.Disconnected(reason));
         scheduler.close();
         realTimeFixedRateExecutor.shutdown();
+        eventExecutor.shutdown();
+        try {
+            if (!eventExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                eventExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            eventExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     public void connect() {
@@ -1052,5 +1079,10 @@ public class MumbleClient {
      */
     public MumbleUser getSelf() {
         return this.self;
+    }
+
+    @Override
+    public void close() {
+        onDisconnected("Client disconnected");
     }
 }

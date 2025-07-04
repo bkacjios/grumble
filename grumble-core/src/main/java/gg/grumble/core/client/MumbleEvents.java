@@ -38,6 +38,9 @@ public final class MumbleEvents {
     public record ChannelRemove(MumbleChannel channel, MumbleProto.ChannelRemove remove) implements MumbleEvent {
     }
 
+    public record ChannelCreated(MumbleChannel channel) implements MumbleEvent {
+    }
+
     public record ChannelState(MumbleChannel channel, MumbleProto.ChannelState state) implements MumbleEvent {
     }
 
@@ -102,6 +105,9 @@ public final class MumbleEvents {
     }
 
     public record UserStopSpeaking(MumbleUser user) implements MumbleEvent {
+    }
+
+    public record EventException(MumbleEvent originalEvent, Throwable cause) {
     }
 }
 

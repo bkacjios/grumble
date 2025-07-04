@@ -12,6 +12,8 @@ import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -39,6 +41,8 @@ public class GrumbleController {
     }
 
     public void initialize() {
+        loadIcons();
+
         client.connect();
         client.addEventListener(MumbleEvents.Connected.class, event -> {
             client.authenticate("Java-BOT");
@@ -57,19 +61,47 @@ public class GrumbleController {
                 });
             }
         });
+        client.addEventListener(MumbleEvents.UserConnected.class, event -> {
+            Platform.runLater(() -> addUserToChannel(event.user(), event.user().getChannel()));
+        });
+        client.addEventListener(MumbleEvents.UserRemove.class, event -> {
+            Platform.runLater(() -> removeUserFromChannel(event.user(), event.user().getChannel()));
+        });
+        client.addEventListener(MumbleEvents.ChannelCreated.class, event -> {
+            Platform.runLater(() -> createChannel(event.channel()));
+        });
+        client.addEventListener(MumbleEvents.ChannelRemove.class, event -> {
+            Platform.runLater(() -> removeChannel(event.channel()));
+        });
 
         mumbleTree.setCellFactory(tv -> new TreeCell<>() {
-            private final ImageView channelView = new ImageView(channelIcon);
             private final ImageView userView = new ImageView(userIcon);
             private final ImageView mutedView = new ImageView(mutedIcon);
 
             {
-                channelView.setFitWidth(16);
-                channelView.setFitHeight(16);
                 userView.setFitWidth(16);
                 userView.setFitHeight(16);
                 mutedView.setFitWidth(16);
                 mutedView.setFitHeight(16);
+
+                // Intercept double-click to prevent expand/collapse and trigger custom logic
+                addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
+                    if (event.getClickCount() > 2 && event.getButton() == MouseButton.PRIMARY) {
+                        event.consume();
+                    } else if (event.getClickCount() == 2 && event.getButton() == MouseButton.PRIMARY) {
+                        event.consume(); // prevent collapse/expand
+                        TreeItem<Object> item = getTreeItem();
+                        if (item != null && item.getValue() != null) {
+                            Object value = item.getValue();
+                            if (value instanceof MumbleChannel channel) {
+                                LOG.info("Double-clicked channel: {}", channel.getName());
+                                client.getSelf().moveToChannel(channel);
+                            } else if (value instanceof MumbleUser user) {
+                                LOG.info("Double-clicked user: {}", user.getName());
+                            }
+                        }
+                    }
+                });
             }
 
             @Override
@@ -80,7 +112,7 @@ public class GrumbleController {
                     setGraphic(null);
                 } else if (item instanceof MumbleChannel channel) {
                     setText(channel.getName());
-                    setGraphic(channelView);
+                    setGraphic(null); // optional: you could set a channel icon here
                 } else if (item instanceof MumbleUser user) {
                     setText(user.getName());
                     setGraphic(user.isMute() ? mutedView : userView);
@@ -90,9 +122,18 @@ public class GrumbleController {
     }
 
     private void loadIcons() {
-        channelIcon = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/channel.png")));
-        userIcon = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/user.png")));
-        mutedIcon = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/mic_muted.png")));
+        channelIcon = new Image(
+                Objects.requireNonNull(getClass().getResource("/icons/channel.png")).toExternalForm(),
+                16, 16, true, true
+        );
+        userIcon = new Image(
+                Objects.requireNonNull(getClass().getResource("/icons/talking_off.png")).toExternalForm(),
+                16, 16, true, true
+        );
+        mutedIcon = new Image(
+                Objects.requireNonNull(getClass().getResource("/icons/muted_self.png")).toExternalForm(),
+                16, 16, true, true
+        );
     }
 
     private TreeItem<Object> buildTree(MumbleChannel channel, boolean isRoot) {
@@ -122,8 +163,9 @@ public class GrumbleController {
             children.add(new TreeItem<>(MumbleUser));
         }
 
-        if (children.isEmpty() && !isRoot)
+        if (children.isEmpty() && !isRoot) {
             return null;
+        }
 
         TreeItem<Object> channelItem = new TreeItem<>(channel);
         ObservableList<TreeItem<Object>> childrenObs = channelItem.getChildren();
@@ -140,10 +182,8 @@ public class GrumbleController {
 
         TreeItem<Object> userItem = new TreeItem<>(user);
 
-        Platform.runLater(() -> {
-            ObservableList<TreeItem<Object>> children = channelItem.getChildren();
-            insertSorted(children, userItem, this::mumbleSort);
-        });
+        ObservableList<TreeItem<Object>> children = channelItem.getChildren();
+        insertSorted(children, userItem, this::mumbleSort);
     }
 
     // Removes MumbleUser from MumbleChannel and UI tree
@@ -152,14 +192,26 @@ public class GrumbleController {
         TreeItem<Object> channelItem = channelNodeMap.get(channel);
         if (channelItem == null) return;
 
-        Platform.runLater(() -> {
-            channelItem.getChildren().removeIf(child -> {
-                Object val = child.getValue();
-                return val instanceof MumbleUser u && u == user;
-            });
-
-            pruneIfEmpty(channelItem);
+        channelItem.getChildren().removeIf(child -> {
+            Object val = child.getValue();
+            return val instanceof MumbleUser u && u == user;
         });
+
+        pruneIfEmpty(channelItem);
+    }
+
+    private void createChannel(MumbleChannel channel) {
+        TreeItem<Object> parentItem = channelNodeMap.get(channel.getParent());
+        if (parentItem == null) {
+            LOG.warn("Parent channel not found in tree for new channel: {}", channel.getName());
+            return;
+        }
+
+        TreeItem<Object> newChannelItem = new TreeItem<>(channel);
+        channelNodeMap.put(channel, newChannelItem);
+
+        insertSorted(parentItem.getChildren(), newChannelItem, this::mumbleSort);
+        parentItem.setExpanded(true); // optionally expand on new children
     }
 
     // Removes a MumbleChannel and its subtree from UI and map
@@ -167,13 +219,10 @@ public class GrumbleController {
         TreeItem<Object> item = channelNodeMap.get(channel);
         if (item == null || item.getParent() == null) return;
 
-        Platform.runLater(() -> {
-            TreeItem<Object> parent = item.getParent();
-            parent.getChildren().remove(item);
-            channelNodeMap.remove(channel);
-
-            pruneIfEmpty(parent);
-        });
+        TreeItem<Object> parent = item.getParent();
+        parent.getChildren().remove(item);
+        channelNodeMap.remove(channel);
+        pruneIfEmpty(parent);
     }
 
     // Removes empty channels recursively (hides empty ones)

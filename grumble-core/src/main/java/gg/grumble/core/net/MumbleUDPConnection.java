@@ -98,7 +98,9 @@ public class MumbleUDPConnection implements Closeable {
                     SelectionKey key = it.next();
                     it.remove();
 
-                    LOG.trace("SelectionKey: valid={}, readable={}", key.isValid(), key.isReadable());
+                    if (LOG.isTraceEnabled()) {
+                        LOG.trace("SelectionKey: valid={}, readable={}", key.isValid(), key.isReadable());
+                    }
 
                     if (!key.isValid()) {
                         LOG.warn("SelectionKey invalid, re-registering channel");
@@ -125,7 +127,9 @@ public class MumbleUDPConnection implements Closeable {
                     }
                 }
 
-                LOG.trace("DatagramChannel open: {}", channel.isOpen());
+                if (LOG.isTraceEnabled()) {
+                    LOG.trace("DatagramChannel open: {}", channel.isOpen());
+                }
             }
         } catch (IOException e) {
             if (running) {
