@@ -98,7 +98,7 @@ public class MumbleVarInt {
             byte b1 = buffer.get(), b2 = buffer.get();
             return ((v & 0x1F) << 16) | ((b1 & 0xFF) << 8) | (b2 & 0xFF);
         } else {
-            throw new IllegalArgumentException("Invalid varint prefix: " + (v & 0xFF));
+            throw new IllegalStateException("Invalid varint prefix: " + (v & 0xFF));
         }
     }
 
