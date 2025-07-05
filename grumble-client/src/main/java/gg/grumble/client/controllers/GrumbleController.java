@@ -9,6 +9,8 @@ import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
@@ -158,18 +160,31 @@ public class GrumbleController {
                     view.setFitHeight(ICON_SIZE);
                 });
 
-                // Intercept double-click to prevent expand/collapse
                 addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
-                    if (event.getClickCount() >= 2 && event.getButton() == MouseButton.PRIMARY) {
-                        event.consume();
-                        TreeItem<Object> item = getTreeItem();
-                        if (item != null && item.getValue() != null) {
-                            Object value = item.getValue();
-                            if (value instanceof MumbleChannel channel) {
-                                client.getSelf().moveToChannel(channel);
-                            } else if (value instanceof MumbleUserFx userFx) {
-                                // TODO: Open send message dialog
-                            }
+                    // only care about double-clicks on the main cell
+                    if (event.getButton() != MouseButton.PRIMARY || event.getClickCount() < 2)
+                        return;
+
+                    // see if the click landed on the disclosure node
+                    Node target = (Node) event.getTarget();
+                    Node disclosure = getDisclosureNode();
+                    while (target != null) {
+                        if (target == disclosure) {
+                            // clicked on the arrow, ignore
+                            return;
+                        }
+                        target = target.getParent();
+                    }
+
+                    // otherwise it really was a double click on the cell text/value
+                    event.consume();
+                    TreeItem<Object> item = getTreeItem();
+                    if (item != null && item.getValue() != null) {
+                        Object value = item.getValue();
+                        if (value instanceof MumbleChannel channel) {
+                            client.getSelf().moveToChannel(channel);
+                        } else if (value instanceof MumbleUserFx userFx) {
+                            // TODO: open send-message dialog
                         }
                     }
                 });
@@ -248,6 +263,7 @@ public class GrumbleController {
 
                 // 5) Assemble
                 HBox box = new HBox(4, speakView, nameLabel, spacer, selfMute, selfDeaf, serverMute, serverDeaf);
+                box.setAlignment(Pos.CENTER);
                 setText(null);
                 setGraphic(box);
                 setContentDisplay(ContentDisplay.GRAPHIC_ONLY);

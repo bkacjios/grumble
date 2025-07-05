@@ -1,7 +1,6 @@
 package gg.grumble.client.models;
 
 import gg.grumble.core.models.MumbleUser;
-import gg.grumble.mumble.MumbleProto;
 import javafx.beans.property.*;
 
 public class MumbleUserFx {

@@ -25,6 +25,7 @@ public class MumbleUser {
     private boolean suppressed;
     private boolean selfMute;
     private boolean selfDeaf;
+    private boolean localMute;
     private boolean prioritySpeaker;
     private boolean recording;
     private boolean speaking;
@@ -124,6 +125,10 @@ public class MumbleUser {
         return selfDeaf;
     }
 
+    public boolean isLocalMute() {
+        return localMute;
+    }
+
     public boolean isPrioritySpeaker() {
         return prioritySpeaker;
     }
@@ -138,10 +143,6 @@ public class MumbleUser {
 
     public boolean isSpeaking() {
         return speaking;
-    }
-
-    public void setTransmitting(boolean b) {
-        this.transmitting = b;
     }
 
     public boolean isTransmitting() {

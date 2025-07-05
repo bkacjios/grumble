@@ -164,6 +164,26 @@ public class MumbleClient implements Closeable {
         );
 
         try {
+            Mixer.Info[] mixers = AudioSystem.getMixerInfo();
+            System.out.println("Available mixers and their lines:");
+            for (Mixer.Info mixerInfo : mixers) {
+                System.out.printf("Mixer: %s (%s)%n", mixerInfo.getName(), mixerInfo.getDescription());
+                Mixer mixer = AudioSystem.getMixer(mixerInfo);
+
+                // SourceDataLine (playback) lines
+                Line.Info[] sourceLineInfos = mixer.getSourceLineInfo();
+                for (Line.Info li : sourceLineInfos) {
+                    System.out.println("  SourceLine: " + li);
+                }
+
+                // TargetDataLine (capture) lines
+                Line.Info[] targetLineInfos = mixer.getTargetLineInfo();
+                for (Line.Info li : targetLineInfos) {
+                    System.out.println("  TargetLine: " + li);
+                }
+                System.out.println();
+            }
+
             DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
             SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
             line.open(format);
@@ -174,7 +194,6 @@ public class MumbleClient implements Closeable {
             throw new RuntimeException("Failed to initialize audio output", e);
         }
     }
-
 
     private void onConnectedTcp() {
         sendVersion();
@@ -324,43 +343,46 @@ public class MumbleClient implements Closeable {
         float[] mix = new float[SAMPLES_PER_FRAME_TOTAL];
         float[] buf = new float[SAMPLES_PER_FRAME_TOTAL];
 
-        for (MumbleUser u : getUsers()) {
-            long id = u.getSession();
-            boolean was = u.isSpeaking();
-            boolean next = false;
+        for (MumbleUser user : getUsers()) {
+            long session = user.getSession();
+            boolean wasSpeaking = user.isSpeaking();
+            boolean nowSpeaking = false;
 
             // Try real audio
-            int samples = u.popPcmAudio(buf, SAMPLES_PER_FRAME_TOTAL);
+            int samples = user.popPcmAudio(buf, SAMPLES_PER_FRAME_TOTAL);
             if (samples > 0) {
-                plcCount.remove(id);
-                next = true;
+                plcCount.remove(session);
+                nowSpeaking = true;
             }
             // Try PLC
-            else if (u.isTransmitting() && plcCount.getOrDefault(id, 0) < MAX_PLC) {
-                samples = opusDecoders.get(id)
+            else if (user.isTransmitting() && plcCount.getOrDefault(session, 0) < MAX_PLC) {
+                samples = opusDecoders.get(session)
                         .decodeFloat(EMPTY_BYTES, buf, SAMPLES_PER_FRAME);
-                plcCount.merge(id, 1, Integer::sum);
-                if (samples > 0) next = true;
+                plcCount.merge(session, 1, Integer::sum);
+                if (samples > 0) nowSpeaking = true;
             }
 
-            u.setSpeaking(next);
+            user.setSpeaking(nowSpeaking);
 
             // Single start/stop fire
-            if (!was && next) {
-                fireEvent(new MumbleEvents.UserStartSpeaking(u));
-            } else if (was && !next) {
-                fireEvent(new MumbleEvents.UserStopSpeaking(u));
+            if (!wasSpeaking && nowSpeaking) {
+                fireEvent(new MumbleEvents.UserStartSpeaking(user));
+            } else if (wasSpeaking && !nowSpeaking) {
+                fireEvent(new MumbleEvents.UserStopSpeaking(user));
             }
 
-            // Mix & speak‐event when we have actual samples
-            if (next) {
-                float gain = u.isAutoGainEnabled()
-                        ? computeAutoGain(buf, samples)
-                        : u.getManualGain();
-                for (int i = 0; i < samples; i++) {
-                    mix[i] += buf[i] * gain;
+            if (nowSpeaking) {
+                if (!user.isLocalMute()) {
+                    // Only mix if we aren't locally muted
+                    float gain = user.isAutoGainEnabled()
+                            ? computeAutoGain(buf, samples)
+                            : user.getManualGain();
+                    for (int i = 0; i < samples; i++) {
+                        mix[i] += buf[i] * gain;
+                    }
                 }
-                fireEvent(new MumbleEvents.UserSpeak(u, Arrays.copyOf(buf, samples)));
+                // Trigger speak event with PCM data
+                fireEvent(new MumbleEvents.UserSpeak(user, Arrays.copyOf(buf, samples)));
             }
         }
 
