@@ -197,6 +197,13 @@ public class MumbleUser {
         client.send(MumbleMessageType.USER_STATE, user.build());
     }
 
+    public void message(String message) {
+        MumbleProto.TextMessage.Builder textMessage = MumbleProto.TextMessage.newBuilder();
+        textMessage.setMessage(message);
+        textMessage.addSession((int) this.session);
+        client.send(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
+    }
+
     public boolean isAutoGainEnabled() {
         return autoGainEnabled;
     }

@@ -4,7 +4,7 @@ plugins {
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'org.springframework.boot' version '3.5.0'
     id 'io.spring.dependency-management' version '1.1.7'
-    id 'org.graalvm.buildtools.native' version '0.10.6'
+//    id 'org.graalvm.buildtools.native' version '0.10.6'
 }
 
 group = 'gg.grumble.client'
@@ -29,35 +29,35 @@ tasks.register('runAgentManual', JavaExec) {
     ]
 }
 
-graalvmNative {
-    toolchainDetection = false
-
-    binaries {
-        main {
-            javaLauncher = javaToolchains.launcherFor {
-                languageVersion = JavaLanguageVersion.of(21)
-                vendor = JvmVendorSpec.GRAAL_VM
-            }
-
-            buildArgs.addAll([
-                    "-H:+UnlockExperimentalVMOptions",
-                    "-H:TraceClassInitialization=com.sun.media.sound.PortMixerProvider",
-                    "-H:ClassInitialization=com.sun.media.sound.PortMixerProvider:run_time",
-                    "-H:ClassInitialization=com.sun.media.sound.DirectAudioDeviceProvider:run_time",
-                    "-H:ConfigurationFileDirectories=build/native/agent-output/runAgentManual",
-                    "-H:+AddAllCharsets",
-                    "-H:+ReportExceptionStackTraces"
-            ])
-
-            resources {
-                includedPatterns.add("natives/.*")
-                includedPatterns.add("META-INF/services/.*")
-            }
-
-            runtimeArgs.add('-Djava.home=.')
-        }
-    }
-}
+//graalvmNative {
+//    toolchainDetection = false
+//
+//    binaries {
+//        main {
+//            javaLauncher = javaToolchains.launcherFor {
+//                languageVersion = JavaLanguageVersion.of(21)
+//                vendor = JvmVendorSpec.GRAAL_VM
+//            }
+//
+//            buildArgs.addAll([
+//                    "-H:+UnlockExperimentalVMOptions",
+//                    "-H:TraceClassInitialization=com.sun.media.sound.PortMixerProvider",
+//                    "-H:ClassInitialization=com.sun.media.sound.PortMixerProvider:run_time",
+//                    "-H:ClassInitialization=com.sun.media.sound.DirectAudioDeviceProvider:run_time",
+//                    "-H:ConfigurationFileDirectories=build/native/agent-output/runAgentManual",
+//                    "-H:+AddAllCharsets",
+//                    "-H:+ReportExceptionStackTraces"
+//            ])
+//
+//            resources {
+//                includedPatterns.add("natives/.*")
+//                includedPatterns.add("META-INF/services/.*")
+//            }
+//
+//            runtimeArgs.add('-Djava.home=.')
+//        }
+//    }
+//}
 
 repositories {
     mavenCentral()
@@ -85,6 +85,8 @@ dependencies {
 
     // richtextfx
     implementation 'org.fxmisc.richtext:richtextfx:0.11.5'
+
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
 }
 
 test {

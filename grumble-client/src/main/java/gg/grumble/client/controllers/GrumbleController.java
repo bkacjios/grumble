@@ -14,6 +14,8 @@ import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
@@ -34,6 +36,8 @@ public class GrumbleController {
 
     @FXML
     public TreeView<Object> mumbleTree;
+    @FXML
+    public TextArea chatMessage;
 
     private final MumbleClient client;
 
@@ -142,6 +146,8 @@ public class GrumbleController {
                 addUserToChannel(user, event.to());
             });
         });
+
+        initializeChat();
 
         mumbleTree.setCellFactory(tv -> new TreeCell<>() {
             private final ImageView user = new ImageView(userIcon);
@@ -271,26 +277,66 @@ public class GrumbleController {
         });
     }
 
+    private void initializeChat() {
+        chatMessage.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == KeyCode.ENTER) {
+                // always consume, so nothing is ever auto-inserted
+                event.consume();
+
+                if (event.isShiftDown()) {
+                    // SHIFT+ENTER → newline
+                    int pos = chatMessage.getCaretPosition();
+                    chatMessage.insertText(pos, System.lineSeparator());
+                } else {
+                    // ENTER alone → fire your action
+                    String toSend = chatMessage.getText();
+                    sendMessage(toSend);
+                    chatMessage.clear();
+                }
+            }
+        });
+    }
+
+    private Object getSelectedTreeItem() {
+        TreeItem<Object> selectedItem = mumbleTree.getSelectionModel().getSelectedItem();
+
+        if (selectedItem != null) {
+            return selectedItem.getValue();
+        }
+        return null;
+    }
+
+    private void sendMessage(String message) {
+        Object selected = getSelectedTreeItem();
+        if (selected instanceof MumbleUserFx user) {
+            user.getUser().message(message);
+        } else if (selected instanceof MumbleChannel channel) {
+            channel.message(message);
+        } else {
+            LOG.error("Attempted to send message to unsupported tree object: {}", selected);
+        }
+    }
+
+    /**
+     * Build the tree view for Channels and Users
+     */
     private TreeItem<Object> buildTree(MumbleChannel channel) {
         List<TreeItem<Object>> children = new ArrayList<>();
 
         // 1) add all users (sorted) first
         channel.getUsers().stream()
-                .sorted(Comparator.comparing(MumbleUser::getName, String.CASE_INSENSITIVE_ORDER))
-                .forEach(u -> {
-                    MumbleUserFx fx = new MumbleUserFx(u);
+                .map(MumbleUserFx::new)
+                .sorted(this::sortUser)
+                .forEach(fx -> {
                     TreeItem<Object> userItem = new TreeItem<>(fx);
-                    userFxMap.put(u, fx);
-                    userNodeMap.put(u, userItem);
+                    userFxMap.put(fx.getUser(), fx);
+                    userNodeMap.put(fx.getUser(), userItem);
                     children.add(userItem);
                 });
 
         // 2) then add all sub-channels (sorted)
         channel.getChildren().stream()
-                .sorted(Comparator
-                        .comparingLong(MumbleChannel::getParentId)
-                        .thenComparingLong(MumbleChannel::getPosition)
-                        .thenComparing(c -> c.getName().toLowerCase()))
+                .sorted(this::sortChannel)
                 .forEach(sub -> children.add(buildTree(sub)));
 
         TreeItem<Object> channelItem = new TreeItem<>(channel);
@@ -416,24 +462,37 @@ public class GrumbleController {
         list.add(i, newItem);
     }
 
-    // Comparator for Channels and Users
+    /**
+     * Custom sort for Tree Items.
+     * Users come before channels.
+     * Channels are sorted by parent, position, then lastly name.
+     * Users are sorted by name only.
+     */
     private int mumbleSort(TreeItem<Object> a, TreeItem<Object> b) {
         Object va = a.getValue();
         Object vb = b.getValue();
 
         if (va instanceof MumbleChannel ca && vb instanceof MumbleChannel cb) {
-            int pidCmp = Long.compare(ca.getParentId(), cb.getParentId());
-            if (pidCmp != 0) return pidCmp;
-
-            int posCmp = Integer.compare(ca.getPosition(), cb.getPosition());
-            if (posCmp != 0) return posCmp;
-
-            return ca.getName().compareToIgnoreCase(cb.getName());
+            return sortChannel(ca, cb);
         }
         if (va instanceof MumbleUserFx ua && vb instanceof MumbleUserFx ub) {
-            return ua.getName().compareToIgnoreCase(ub.getName());
+            return sortUser(ua, ub);
         }
         // Users before Channels
         return (va instanceof MumbleChannel) ? 1 : -1;
+    }
+
+    private int sortUser(MumbleUserFx ua, MumbleUserFx ub) {
+        return ua.getName().compareToIgnoreCase(ub.getName());
+    }
+
+    private int sortChannel(MumbleChannel ca, MumbleChannel cb) {
+        int pidCmp = Long.compare(ca.getParentId(), cb.getParentId());
+        if (pidCmp != 0) return pidCmp;
+
+        int posCmp = Integer.compare(ca.getPosition(), cb.getPosition());
+        if (posCmp != 0) return posCmp;
+
+        return ca.getName().compareToIgnoreCase(cb.getName());
     }
 }

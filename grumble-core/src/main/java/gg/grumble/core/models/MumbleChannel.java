@@ -1,6 +1,7 @@
 package gg.grumble.core.models;
 
 import gg.grumble.core.client.MumbleClient;
+import gg.grumble.core.enums.MumbleMessageType;
 import gg.grumble.mumble.MumbleProto;
 
 import java.util.LinkedHashSet;
@@ -112,6 +113,21 @@ public class MumbleChannel {
 
 	public List<MumbleChannel> getChildren() {
 		return client.getChildren(channelId);
+	}
+
+	public void message(String message) {
+		message(message, false);
+	}
+
+	public void message(String message, boolean recursive) {
+		MumbleProto.TextMessage.Builder textMessage = MumbleProto.TextMessage.newBuilder();
+		textMessage.setMessage(message);
+		if (recursive) {
+			textMessage.addChannelId((int) this.channelId);
+		} else {
+			textMessage.addTreeId((int) this.channelId);
+		}
+		client.send(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
 	}
 
 	@SuppressWarnings("unused")

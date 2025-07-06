@@ -27,12 +27,6 @@ public class GrumbleFxApplication extends Application {
 
     @Override
     public void start(Stage stage) {
-//        if (Boolean.getBoolean("spring.aot.processing")) {
-//            // In AOT mode: do not start JavaFX UI, but allow Spring context to load
-//            Platform.exit();
-//            return;
-//        }
-
         try {
             // Load your FXML and controller from Spring context
             FXMLLoader fxmlLoader = new FXMLLoader(getClass().getResource("/fxml/main.fxml"));

@@ -71,7 +71,7 @@
                <children>
                    <Button graphicTextGap="0" mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
                        <graphic>
-                           <ImageView fitHeight="30" fitWidth="30" preserveRatio="true" cache="true">
+                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
                                <image>
                                    <Image url="@../icons/connect.png" />
                                </image>
@@ -80,7 +80,7 @@
                    </Button>
                    <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
                        <graphic>
-                           <ImageView fitHeight="30" fitWidth="30" preserveRatio="true" cache="true">
+                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
                                <image>
                                    <Image url="@../icons/info.png" />
                                </image>
@@ -89,7 +89,7 @@
                    </Button>
                    <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
                        <graphic>
-                           <ImageView fitHeight="30" fitWidth="30" preserveRatio="true" cache="true">
+                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
                                <image>
                                    <Image url="@../icons/input_microphone.png" />
                                </image>
@@ -98,7 +98,7 @@
                    </Button>
                    <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
                        <graphic>
-                           <ImageView fitHeight="30" fitWidth="30" preserveRatio="true" cache="true">
+                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
                                <image>
                                    <Image url="@../icons/self_undeafened.png" />
                                </image>
@@ -107,7 +107,7 @@
                    </Button>
                    <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
                        <graphic>
-                           <ImageView fitHeight="30" fitWidth="30" preserveRatio="true" cache="true">
+                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
                                <image>
                                    <Image url="@../icons/record.png" />
                                </image>
@@ -131,7 +131,7 @@
                               <VBox />
                               <BorderPane>
                                  <center>
-                                    <TextArea />
+                                    <TextArea fx:id="chatMessage" />
                                  </center>
                                  <opaqueInsets>
                                     <Insets />
