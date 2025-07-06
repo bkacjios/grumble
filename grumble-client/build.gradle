@@ -4,16 +4,43 @@ plugins {
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'org.springframework.boot' version '3.5.0'
     id 'io.spring.dependency-management' version '1.1.7'
-//    id 'org.graalvm.buildtools.native' version '0.10.6'
+    id 'org.graalvm.buildtools.native' version '0.10.6'
 }
 
 group = 'gg.grumble.client'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(24)
         vendor = JvmVendorSpec.GRAAL_VM
     }
+}
+
+tasks.register('runClient', JavaExec) {
+    group = 'application'
+    description = 'Run app'
+
+    mainClass.set('gg.grumble.client.GrumbleLauncher')
+    classpath = sourceSets.main.runtimeClasspath
+
+    // 1) get the list of modules you asked for in build.gradle
+    def javafxExt   = project.extensions.getByName('javafx')
+    def moduleNames = javafxExt.modules.join(',')
+
+    // 2) pick out every JAR on the runtimeClasspath whose name starts with "javafx-"
+    def javafxJars = configurations.runtimeClasspath
+            .filter { it.name.startsWith('javafx-') }
+            .collect { it.absolutePath }
+            .join(File.pathSeparator)
+
+    jvmArgs = [
+            "--module-path", javafxJars,
+            "--add-modules", moduleNames,
+            "--enable-native-access=javafx.graphics",
+            "--enable-native-access=ALL-UNNAMED"
+    ]
+
+    outputs.upToDateWhen { false }
 }
 
 tasks.register('runAgentManual', JavaExec) {
@@ -23,41 +50,58 @@ tasks.register('runAgentManual', JavaExec) {
     mainClass.set('gg.grumble.client.GrumbleLauncher')
     classpath = sourceSets.main.runtimeClasspath
 
+    // 1) get the list of modules you asked for in build.gradle
+    def javafxExt   = project.extensions.getByName('javafx')
+    def moduleNames = javafxExt.modules.join(',')
+
+    // 2) pick out every JAR on the runtimeClasspath whose name starts with "javafx-"
+    def javafxJars = configurations.runtimeClasspath
+            .filter { it.name.startsWith('javafx-') }
+            .collect { it.absolutePath }
+            .join(File.pathSeparator)
+
     jvmArgs = [
+            "--module-path", javafxJars,
+            "--add-modules", moduleNames,
+            "--enable-native-access=javafx.graphics",
+            "--enable-native-access=ALL-UNNAMED",
             "-agentlib:native-image-agent=config-output-dir=build/native/agent-output/runAgentManual",
             "-Dspring.aot.enabled=false"
     ]
 }
 
-//graalvmNative {
-//    toolchainDetection = false
-//
-//    binaries {
-//        main {
-//            javaLauncher = javaToolchains.launcherFor {
-//                languageVersion = JavaLanguageVersion.of(21)
-//                vendor = JvmVendorSpec.GRAAL_VM
-//            }
-//
-//            buildArgs.addAll([
-//                    "-H:+UnlockExperimentalVMOptions",
-//                    "-H:TraceClassInitialization=com.sun.media.sound.PortMixerProvider",
-//                    "-H:ClassInitialization=com.sun.media.sound.PortMixerProvider:run_time",
-//                    "-H:ClassInitialization=com.sun.media.sound.DirectAudioDeviceProvider:run_time",
-//                    "-H:ConfigurationFileDirectories=build/native/agent-output/runAgentManual",
-//                    "-H:+AddAllCharsets",
-//                    "-H:+ReportExceptionStackTraces"
-//            ])
-//
-//            resources {
-//                includedPatterns.add("natives/.*")
-//                includedPatterns.add("META-INF/services/.*")
-//            }
-//
-//            runtimeArgs.add('-Djava.home=.')
-//        }
-//    }
-//}
+tasks.named("nativeCompile") {
+    dependsOn("runAgentManual")
+}
+
+graalvmNative {
+    toolchainDetection = false
+
+    binaries {
+        main {
+            javaLauncher = javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(24)
+                vendor = JvmVendorSpec.GRAAL_VM
+            }
+
+            configurationFileDirectories.from("src/main/resources/META-INF/native-image")
+
+            buildArgs.addAll([
+                    "--enable-native-access=ALL-UNNAMED",
+                    "-H:+UnlockExperimentalVMOptions",
+                    "-H:ConfigurationFileDirectories=build/native/agent-output/runAgentManual",
+                    "-H:+AddAllCharsets",
+                    "-H:ReflectionConfigurationResources=META-INF/native-image/reflect-config.json",
+            ])
+
+            resources {
+                includedPatterns.add("natives/.*")
+            }
+
+            runtimeArgs.add('-Djava.home=.')
+        }
+    }
+}
 
 repositories {
     mavenCentral()
@@ -68,7 +112,7 @@ repositories {
 }
 
 javafx {
-    version = '21.0.7'
+    version = '24.0.1'
     modules = ['javafx.controls', 'javafx.fxml', 'javafx.web']
 }
 
@@ -87,6 +131,13 @@ dependencies {
     implementation 'org.fxmisc.richtext:richtextfx:0.11.5'
 
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // openal
+    implementation 'org.lwjgl:lwjgl-openal:3.3.6'
+
+    // lwjgl natives
+    runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl-openal:3.3.6:natives-windows"
 }
 
 test {

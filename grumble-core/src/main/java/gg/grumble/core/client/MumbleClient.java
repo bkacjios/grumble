@@ -2,6 +2,9 @@ package gg.grumble.core.client;
 
 import club.minnced.opus.util.OpusLibrary;
 import com.google.protobuf.*;
+import gg.grumble.core.audio.AudioEngine;
+import gg.grumble.core.audio.AudioOutput;
+import gg.grumble.core.audio.NullAudioOutput;
 import gg.grumble.core.crypto.MumbleOCB2;
 import gg.grumble.core.enums.MumbleClientType;
 import gg.grumble.core.enums.MumbleMessageType;
@@ -19,7 +22,6 @@ import gg.grumble.mumble.MumbleUDPProto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.sound.sampled.*;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -53,14 +55,13 @@ public class MumbleClient implements Closeable {
     private final MumbleOCB2 crypto = new MumbleOCB2();
 
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
-    private final SourceDataLine audioOutput;
+
+    private float volume = 0.5f;
 
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    private final RealTimeFixedRateThread realTimeFixedRateExecutor = new RealTimeFixedRateThread(
-            this::mixAndPlayAudio,
-            20,
-            TimeUnit.MILLISECONDS);
+
+    private final AudioEngine audioEngine = new AudioEngine(this::mixAndPlayAudio, new NullAudioOutput());
 
     private final Map<Class<? extends MumbleEvents.MumbleEvent>, List<MumbleEventListener<?>>> listeners = new HashMap<>();
 
@@ -94,10 +95,6 @@ public class MumbleClient implements Closeable {
 
         this.tcpConnection = new MumbleTCPConnection(hostname, port, this::onConnectedTcp, this::processTcpMessage, this::onDisconnected);
         this.udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
-
-        this.audioOutput = initAudioOutput();
-
-        setVolume(0.10f);
     }
 
     private void processUdpMessage(byte[] encrypted) {
@@ -151,47 +148,6 @@ public class MumbleClient implements Closeable {
                     }
                 });
             }
-        }
-    }
-
-    private SourceDataLine initAudioOutput() {
-        AudioFormat format = new AudioFormat(
-                48000,              // Sample rate
-                16,                 // Sample size in bits
-                2,                  // Channels (stereo)
-                true,               // Signed
-                false               // Little-endian
-        );
-
-        try {
-            Mixer.Info[] mixers = AudioSystem.getMixerInfo();
-            System.out.println("Available mixers and their lines:");
-            for (Mixer.Info mixerInfo : mixers) {
-                System.out.printf("Mixer: %s (%s)%n", mixerInfo.getName(), mixerInfo.getDescription());
-                Mixer mixer = AudioSystem.getMixer(mixerInfo);
-
-                // SourceDataLine (playback) lines
-                Line.Info[] sourceLineInfos = mixer.getSourceLineInfo();
-                for (Line.Info li : sourceLineInfos) {
-                    System.out.println("  SourceLine: " + li);
-                }
-
-                // TargetDataLine (capture) lines
-                Line.Info[] targetLineInfos = mixer.getTargetLineInfo();
-                for (Line.Info li : targetLineInfos) {
-                    System.out.println("  TargetLine: " + li);
-                }
-                System.out.println();
-            }
-
-            DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
-            SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
-            line.open(format);
-            line.start();
-            realTimeFixedRateExecutor.start();
-            return line;
-        } catch (LineUnavailableException e) {
-            throw new RuntimeException("Failed to initialize audio output", e);
         }
     }
 
@@ -301,35 +257,9 @@ public class MumbleClient implements Closeable {
 
         // Schedule TCP & UDP pings to keep connection alive
         scheduler.scheduleAtFixedRate(this::pingTcp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
+        audioEngine.start();
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
-    }
-
-    public void setVolume(float volume) {
-        if (volume < 0f || volume > 1f) {
-            throw new IllegalArgumentException("Volume must be between 0.0 and 1.0");
-        }
-
-        if (!audioOutput.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
-            throw new IllegalStateException("Audio device does not support gain control");
-        }
-
-        FloatControl gainControl = (FloatControl) audioOutput.getControl(FloatControl.Type.MASTER_GAIN);
-        float min = gainControl.getMinimum(); // Usually negative dB, like -80.0
-        float max = gainControl.getMaximum(); // Usually 0.0 dB
-
-        // Avoid log(0); treat 0 volume as min
-        float dB;
-        if (volume == 0f) {
-            dB = min;
-        } else {
-            // Logarithmic volume scaling: perceptually linear
-            dB = (float) (Math.log10(volume) * 20.0);
-            // Clamp to range
-            dB = Math.max(min, Math.min(dB, max));
-        }
-
-        gainControl.setValue(dB);
     }
 
     /**
@@ -340,59 +270,77 @@ public class MumbleClient implements Closeable {
     private static final byte[] EMPTY_BYTES = new byte[0];
 
     private void mixAndPlayAudio() {
-        float[] mix = new float[SAMPLES_PER_FRAME_TOTAL];
-        float[] buf = new float[SAMPLES_PER_FRAME_TOTAL];
+        try {
+            float[] mix = new float[SAMPLES_PER_FRAME_TOTAL];
+            float[] buf = new float[SAMPLES_PER_FRAME_TOTAL];
 
-        for (MumbleUser user : getUsers()) {
-            long session = user.getSession();
-            boolean wasSpeaking = user.isSpeaking();
-            boolean nowSpeaking = false;
+            for (MumbleUser user : users.values()) {
+                long session = user.getSession();
+                boolean wasSpeaking = user.isSpeaking();
+                boolean nowSpeaking = false;
 
-            // Try real audio
-            int samples = user.popPcmAudio(buf, SAMPLES_PER_FRAME_TOTAL);
-            if (samples > 0) {
-                plcCount.remove(session);
-                nowSpeaking = true;
-            }
-            // Try PLC
-            else if (user.isTransmitting() && plcCount.getOrDefault(session, 0) < MAX_PLC) {
-                samples = opusDecoders.get(session)
-                        .decodeFloat(EMPTY_BYTES, buf, SAMPLES_PER_FRAME);
-                plcCount.merge(session, 1, Integer::sum);
-                if (samples > 0) nowSpeaking = true;
-            }
-
-            user.setSpeaking(nowSpeaking);
-
-            // Single start/stop fire
-            if (!wasSpeaking && nowSpeaking) {
-                fireEvent(new MumbleEvents.UserStartSpeaking(user));
-            } else if (wasSpeaking && !nowSpeaking) {
-                fireEvent(new MumbleEvents.UserStopSpeaking(user));
-            }
-
-            if (nowSpeaking) {
-                if (!user.isLocalMute()) {
-                    // Only mix if we aren't locally muted
-                    float gain = user.isAutoGainEnabled()
-                            ? computeAutoGain(buf, samples)
-                            : user.getManualGain();
-                    for (int i = 0; i < samples; i++) {
-                        mix[i] += buf[i] * gain;
-                    }
+                // Try real audio
+                int samples = user.popPcmAudio(buf, SAMPLES_PER_FRAME_TOTAL);
+                if (samples > 0) {
+                    plcCount.remove(session);
+                    nowSpeaking = true;
                 }
-                // Trigger speak event with PCM data
-                fireEvent(new MumbleEvents.UserSpeak(user, Arrays.copyOf(buf, samples)));
-            }
-        }
+                // Try PLC
+                else if (user.isTransmitting() && plcCount.getOrDefault(session, 0) < MAX_PLC) {
+                    samples = opusDecoders.get(session)
+                            .decodeFloat(EMPTY_BYTES, buf, SAMPLES_PER_FRAME);
+                    plcCount.merge(session, 1, Integer::sum);
+                    if (samples > 0) nowSpeaking = true;
+                }
 
-        // Write out final mix to sound device
-        short[] out = new short[SAMPLES_PER_FRAME_TOTAL];
-        for (int i = 0; i < out.length; i++) {
-            float x = softLimit(mix[i]);
-            out[i] = (short) (Math.max(-1f, Math.min(1f, x)) * 32767f);
+                user.setSpeaking(nowSpeaking);
+
+                // Single start/stop fire
+                if (!wasSpeaking && nowSpeaking) {
+                    LOG.info("User Start Speaking: {}", user);
+                    fireEvent(new MumbleEvents.UserStartSpeaking(user));
+                } else if (wasSpeaking && !nowSpeaking) {
+                    LOG.info("User Stop Speaking: {}", user);
+                    fireEvent(new MumbleEvents.UserStopSpeaking(user));
+                }
+
+                if (nowSpeaking) {
+                    if (!user.isLocalMute()) {
+                        // Only mix if we aren't locally muted
+                        float gain = user.isAutoGainEnabled()
+                                ? computeAutoGain(buf, samples)
+                                : user.getManualGain();
+                        for (int i = 0; i < samples; i++) {
+                            mix[i] += buf[i] * gain;
+                        }
+                    }
+                    // Trigger speak event with PCM data
+                    fireEvent(new MumbleEvents.UserSpeak(user, Arrays.copyOf(buf, samples)));
+                }
+            }
+
+            // Write out final mix to sound device
+            short[] out = new short[SAMPLES_PER_FRAME_TOTAL];
+            for (int i = 0; i < out.length; i++) {
+                float x = softLimit(mix[i]);
+                out[i] = (short) (Math.max(-1f, Math.min(1f, x)) * 32767f);
+            }
+            audioEngine.write(shortsToBytes(out), 0, out.length * 2);
+        } catch (Exception e) {
+            LOG.error("Exception in playback thread", e);
         }
-        audioOutput.write(shortsToBytes(out), 0, out.length * 2);
+    }
+
+    public void setAudioOutput(AudioOutput device) {
+        audioEngine.switchDevice(device);
+    }
+
+    public float getVolume() {
+        return audioEngine.getVolume();
+    }
+
+    public void setVolume(float volume) {
+        audioEngine.setVolume(volume);
     }
 
     private float computeAutoGain(float[] pcm, int samples) {
@@ -635,7 +583,7 @@ public class MumbleClient implements Closeable {
     private void onDisconnected(String reason) {
         fireEvent(new MumbleEvents.Disconnected(reason));
         scheduler.close();
-        realTimeFixedRateExecutor.shutdown();
+        audioEngine.stop();
         eventExecutor.shutdown();
         try {
             if (!eventExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -688,6 +636,10 @@ public class MumbleClient implements Closeable {
         byte header = data.get();
         byte type = (byte) ((header >> 5) & 0x7);
 
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Received UDP legacy packet: {}", type);
+        }
+
         switch (type) {
             case MumblePacketTypeLegacy.PING: {
                 onServerPongUdpLegacy(MumbleVarInt.readVarIntLong(data), udp);
@@ -708,6 +660,10 @@ public class MumbleClient implements Closeable {
 
     private void handleUdpProtobufPacket(ByteBuffer data, boolean udp) {
         byte id = data.get();
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Received UDP protobuf packet: {}", id);
+        }
 
         try {
             switch (id) {
@@ -990,7 +946,7 @@ public class MumbleClient implements Closeable {
         }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Sending {}: {}", protoName, toHex(framed));
+            LOG.debug("Sending TCP {}: {}", protoName, toHex(framed));
         }
 
         tcpConnection.send(framed);
@@ -1049,6 +1005,9 @@ public class MumbleClient implements Closeable {
             MumbleVarInt.writeVarInt(packet, System.nanoTime());
             packet.flip();
             try {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Sending UDP Legacy Ping");
+                }
                 udpConnection.send(crypto.encrypt(packet));
             } catch (Exception e) {
                 LOG.error("Unable to encrypt or send UDP packet", e);
@@ -1057,6 +1016,9 @@ public class MumbleClient implements Closeable {
             MumbleUDPProto.Ping.Builder ping = MumbleUDPProto.Ping.newBuilder();
             ping.setTimestamp(System.nanoTime());
             try {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Sending UDP Protobuf Ping");
+                }
                 udpConnection.send(crypto.encrypt(ping.build().toByteArray()));
             } catch (Exception e) {
                 LOG.error("Unable to encrypt or send UDP packet", e);

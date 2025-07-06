@@ -1,0 +1,13 @@
+[
+  {
+    "name": "gg.grumble.client.config.ApplicationConfig",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.sun.media.sound.DirectAudioDeviceProvider",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  }
+]

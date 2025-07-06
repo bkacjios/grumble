@@ -1,5 +1,6 @@
 package gg.grumble.client.controllers;
 
+import gg.grumble.client.audio.OpenALOutput;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
@@ -25,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import javax.sound.sampled.LineUnavailableException;
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -56,6 +58,8 @@ public class GrumbleController {
 
     public GrumbleController() {
         client = new MumbleClient("pi-two.lan");
+        client.setAudioOutput(new OpenALOutput());
+        client.setVolume(0.1f);
     }
 
     private void loadIcons() {
