@@ -10,6 +10,7 @@ import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
+import javafx.fxml.Initializable;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.*;
@@ -26,11 +27,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.net.URL;
 import java.util.*;
 import java.util.stream.Stream;
 
 @Component
-public class GrumbleController {
+public class GrumbleController implements Initializable {
     private static final Logger LOG = LoggerFactory.getLogger(GrumbleController.class);
 
     private static final int ICON_SIZE = 20;
@@ -92,7 +94,8 @@ public class GrumbleController {
         );
     }
 
-    public void initialize() {
+    @Override
+    public void initialize(URL location, ResourceBundle resources) {
         loadIcons();
 
         client.connect();

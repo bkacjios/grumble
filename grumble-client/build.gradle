@@ -140,6 +140,7 @@ dependencies {
     implementation 'org.fxmisc.richtext:richtextfx:0.11.5'
 
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml'
 
     // openal
     implementation 'org.lwjgl:lwjgl-openal:3.3.6'
