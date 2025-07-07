@@ -13,16 +13,44 @@
 }
 
 .button {
+    /* base look */
     -fx-background-color: #3c3f41;
     -fx-text-fill: #ffffff;
+    -fx-padding: 0.25em 0.5em;
+    -fx-background-radius: 3;
+    -fx-border-radius: 3;
+
+    /* eliminate Modena’s inset trickery */
+    -fx-background-insets: 0;
+    -fx-border-insets: 0;
+
+    /* no focus ring of any kind */
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+    -fx-focus-width: 0;
+    -fx-focus-insets: 0;
+
+    /* no border by default */
+    -fx-border-width: 0;
+
+    /* no shadow or effect */
+    -fx-effect: none;
+    /* no translate except on pressed */
+    -fx-translate-x: 0;
+    -fx-translate-y: 0;
 }
+
 .button:hover {
     -fx-background-color: #4a90e2;
-    -fx-text-fill: #ffffff;
 }
-.button:focused {
-    -fx-border-color: #4a90e2;
+
+.button:pressed {
+    /* pressed “sink” */
+    -fx-translate-x: 1px;
+    -fx-translate-y: 1px;
+    -fx-background-color: derive(#3c3f41, -10%);
 }
+
 
 .text-field, .password-field, .text-area {
     -fx-background-color: #3c3f41;

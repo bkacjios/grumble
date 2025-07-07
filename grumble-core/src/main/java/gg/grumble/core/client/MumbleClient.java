@@ -16,7 +16,6 @@ import gg.grumble.core.net.MumbleTCPConnection;
 import gg.grumble.core.net.MumbleUDPConnection;
 import gg.grumble.core.opus.OpusDecoder;
 import gg.grumble.core.utils.MumbleVarInt;
-import gg.grumble.core.utils.RealTimeFixedRateThread;
 import gg.grumble.mumble.MumbleProto;
 import gg.grumble.mumble.MumbleUDPProto;
 import org.slf4j.Logger;
@@ -55,8 +54,6 @@ public class MumbleClient implements Closeable {
     private final MumbleOCB2 crypto = new MumbleOCB2();
 
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
-
-    private float volume = 0.5f;
 
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();

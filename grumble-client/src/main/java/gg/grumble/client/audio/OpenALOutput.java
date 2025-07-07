@@ -17,9 +17,11 @@ import static gg.grumble.core.enums.MumbleAudioConfig.SAMPLES_PER_FRAME_TOTAL;
 public class OpenALOutput implements AudioOutput {
     private long device;
     private long context;
-    private ALCCapabilities alcCaps;
     private int source;
     private int[] buffers;
+
+    private final ByteBuffer dataBuffer =
+            BufferUtils.createByteBuffer(SAMPLES_PER_FRAME_TOTAL * 2);
 
     @Override
     public void start() {
@@ -31,7 +33,7 @@ public class OpenALOutput implements AudioOutput {
         ALC10.alcMakeContextCurrent(context);
 
         // 2) Initialize capabilities properly and store them for rebinding
-        alcCaps = ALC.createCapabilities(device);
+        ALCCapabilities alcCaps = ALC.createCapabilities(device);
         AL.createCapabilities(alcCaps);
 
         // 3) Generate source and N buffers
@@ -60,14 +62,10 @@ public class OpenALOutput implements AudioOutput {
 
     @Override
     public void write(byte[] pcm, int offset, int length) {
-        // Rebind context & caps on this thread to ensure valid context
-        ALC10.alcMakeContextCurrent(context);
-        AL.createCapabilities(alcCaps);
-
         // Prepare PCM data
-        ByteBuffer data = BufferUtils.createByteBuffer(length)
-                .put(pcm, offset, length)
-                .flip();
+        dataBuffer.clear();
+        dataBuffer.put(pcm, offset, length);
+        dataBuffer.flip();
 
         // Unqueue any processed buffers
         int processed = AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED);
@@ -79,13 +77,14 @@ public class OpenALOutput implements AudioOutput {
             // Refill & requeue each freed buffer
             for (int i = 0; i < processed; i++) {
                 int bufId = unq.get(i);
-                AL10.alBufferData(bufId, AL10.AL_FORMAT_STEREO16, data, SAMPLE_RATE);
+                AL10.alBufferData(bufId, AL10.AL_FORMAT_STEREO16, dataBuffer, SAMPLE_RATE);
                 checkError("alBufferData");
-                AL10.alSourceQueueBuffers(source, bufId);
-                checkError("alSourceQueueBuffers");
 
                 // rewind data for next fill
-                data.rewind();
+                dataBuffer.rewind();
+
+                AL10.alSourceQueueBuffers(source, bufId);
+                checkError("alSourceQueueBuffers");
             }
         }
 

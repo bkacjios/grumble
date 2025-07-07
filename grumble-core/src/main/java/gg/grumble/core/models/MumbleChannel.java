@@ -140,7 +140,8 @@ public class MumbleChannel {
 		for (String part : parts) {
 			if (part.isEmpty() || part.equals(".")) {
 				continue;
-			} else if (part.equals("..")) {
+			}
+			if (part.equals("..")) {
 				current = current.getParent();
 				if (current == null) return null;
 			} else {

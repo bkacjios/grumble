@@ -26,7 +26,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import javax.sound.sampled.LineUnavailableException;
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -98,13 +97,13 @@ public class GrumbleController {
 
         client.connect();
 
-        client.addEventListener(MumbleEvents.Connected.class, event -> {
+        client.addEventListener(MumbleEvents.Connected.class, ignored -> {
             client.authenticate("Java-BOT");
         });
         client.addEventListener(MumbleEvents.Disconnected.class, event -> {
             LOG.warn("Disconnected from mumble server: {}", event.reason());
         });
-        client.addEventListener(MumbleEvents.ServerSync.class, event -> {
+        client.addEventListener(MumbleEvents.ServerSync.class, ignored -> {
             LOG.info("Server synced");
             TreeItem<Object> rootItem = buildTree(client.getChannel(0));
             rootItem.setExpanded(true);
@@ -153,7 +152,27 @@ public class GrumbleController {
 
         initializeChat();
 
-        mumbleTree.setCellFactory(tv -> new TreeCell<>() {
+        chatMessage.promptTextProperty().bind(
+                Bindings.createStringBinding(() -> {
+                            TreeItem<Object> sel = mumbleTree.getSelectionModel().getSelectedItem();
+                            if (sel == null || sel.getValue() == null) {
+                                return "Send message";
+                            }
+                            Object v = sel.getValue();
+                            String name;
+                            if (v instanceof MumbleUserFx user) {
+                                name = user.getName();
+                            } else if (v instanceof MumbleChannel ch) {
+                                name = ch.getName();
+                            } else {
+                                name = v.toString();
+                            }
+                            return "Send message to " + name;
+                        },
+                        mumbleTree.getSelectionModel().selectedItemProperty()
+                ));
+
+        mumbleTree.setCellFactory(ignored -> new TreeCell<>() {
             private final ImageView user = new ImageView(userIcon);
             private final ImageView userSpeaking = new ImageView(userSpeakingIcon);
             private final ImageView userSpeakingMuted = new ImageView(userSpeakingMutedIcon);
