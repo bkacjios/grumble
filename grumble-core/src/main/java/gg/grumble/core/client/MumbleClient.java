@@ -33,6 +33,8 @@ import static gg.grumble.core.enums.MumbleAudioConfig.*;
 public class MumbleClient implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(MumbleClient.class);
 
+    public static final int MUMBLE_DEFAULT_PORT = 64738;
+
     private static final int UDP_TCP_FALLBACK = 2;
 
     private static final int MUMBLE_VERSION_MAJOR = 1;
@@ -48,24 +50,29 @@ public class MumbleClient implements Closeable {
     private static final long MUMBLE_VERSION_V2 = ((long) MUMBLE_VERSION_MAJOR << 48)
             | ((long) MUMBLE_VERSION_MINOR << 32) | ((long) MUMBLE_VERSION_PATCH << 16);
 
-    private final MumbleTCPConnection tcpConnection;
-    private final MumbleUDPConnection udpConnection;
-
     private final MumbleOCB2 crypto = new MumbleOCB2();
 
+    /* Audio */
+    private final AudioEngine audioEngine = new AudioEngine(this::mixAndPlayAudio, new NullAudioOutput());
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
 
+    /* Scheduler */
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService pingScheduler = Executors.newSingleThreadScheduledExecutor();
+    private final List<ScheduledFuture<?>> scheduledPings = new ArrayList<>();
 
-    private final AudioEngine audioEngine = new AudioEngine(this::mixAndPlayAudio, new NullAudioOutput());
-
-    private final Map<Class<? extends MumbleEvents.MumbleEvent>, List<MumbleEventListener<?>>> listeners = new HashMap<>();
-
+    /* Data caches */
     private final Map<Long, MumbleUser> users = new HashMap<>();
     private final Map<Long, MumbleChannel> channels = new HashMap<>();
     private final Map<Long, List<MumbleChannel>> childrenByParent = new HashMap<>();
     private final Map<Long, List<MumbleUser>> usersInChannel = new HashMap<>();
+
+    /* Event listeners */
+    private final Map<Class<? extends MumbleEvents.MumbleEvent>, List<MumbleEventListener<?>>> listeners = new HashMap<>();
+
+    /* Connection state */
+    private MumbleTCPConnection tcpConnection;
+    private MumbleUDPConnection udpConnection;
 
     private MumbleUser self;
 
@@ -83,15 +90,12 @@ public class MumbleClient implements Closeable {
     private float udpPingAverage = 0;
     private float udpPingDeviation = 0;
 
-    public MumbleClient(String hostname, int port) {
+    public MumbleClient() {
         try {
             OpusLibrary.loadFromJar();
         } catch (IOException e) {
             throw new RuntimeException("Failed to load opus library", e);
         }
-
-        this.tcpConnection = new MumbleTCPConnection(hostname, port, this::onConnectedTcp, this::processTcpMessage, this::onDisconnected);
-        this.udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
     }
 
     private void processUdpMessage(byte[] encrypted) {
@@ -103,10 +107,6 @@ public class MumbleClient implements Closeable {
                 LOG.warn("Unable to decrypt UDP packet: {}", e.getMessage());
             }
         }
-    }
-
-    public MumbleClient(String hostname) {
-        this(hostname, 64738);
     }
 
     public <T extends MumbleEvents.MumbleEvent> void addEventListener(Class<T> eventType, MumbleEventListener<T> listener) {
@@ -122,6 +122,10 @@ public class MumbleClient implements Closeable {
                 listeners.remove(eventType);
             }
         }
+    }
+
+    public void removeAllEventListeners() {
+        listeners.clear();
     }
 
     @SuppressWarnings("unchecked")
@@ -253,10 +257,19 @@ public class MumbleClient implements Closeable {
         LOG.info("Fully synced with server");
 
         // Schedule TCP & UDP pings to keep connection alive
-        scheduler.scheduleAtFixedRate(this::pingTcp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
+        schedulePing(this::pingTcp);
         audioEngine.start();
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
+    }
+
+    private void schedulePing(Runnable callback) {
+        scheduledPings.add(pingScheduler.scheduleAtFixedRate(callback, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS));
+    }
+
+    private void unschedulePings() {
+        scheduledPings.forEach(future -> future.cancel(false));
+        scheduledPings.clear();
     }
 
     /**
@@ -537,7 +550,7 @@ public class MumbleClient implements Closeable {
         if (crypto.isInitialized()) {
             LOG.info("Cipher setup: handshake complete");
             udpConnection.connect();
-            scheduler.scheduleAtFixedRate(this::pingUdp, 0, PING_PERIOD_SECONDS, TimeUnit.SECONDS);
+            schedulePing(this::pingUdp);
         } else {
             LOG.warn("Cipher setup: handshake failed");
         }
@@ -579,20 +592,18 @@ public class MumbleClient implements Closeable {
 
     private void onDisconnected(String reason) {
         fireEvent(new MumbleEvents.Disconnected(reason));
-        scheduler.close();
-        audioEngine.stop();
-        eventExecutor.shutdown();
-        try {
-            if (!eventExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                eventExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            eventExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 
-    public void connect() {
+    public void connect(String hostname) {
+        connect(hostname, MUMBLE_DEFAULT_PORT);
+    }
+
+    public void connect(String hostname, int port) {
+        close();
+
+        this.tcpConnection = new MumbleTCPConnection(hostname, port, this::onConnectedTcp, this::processTcpMessage, this::onDisconnected);
+        this.udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
+
         tcpConnection.connect();
     }
 
@@ -1097,6 +1108,31 @@ public class MumbleClient implements Closeable {
 
     @Override
     public void close() {
-        onDisconnected("Client disconnected");
+        unschedulePings();
+        audioEngine.stop();
+        opusDecoders.clear();
+        if (tcpConnection != null) tcpConnection.close();
+        if (udpConnection != null) udpConnection.close();
+        users.clear();
+        channels.clear();
+        childrenByParent.clear();
+        usersInChannel.clear();
+        synced = false;
+        legacyConnection = false;
+        tcpUdpTunnel = true;
+        udpPingAccumulator = 0;
+        tcpPingPackets = 0;
+        tcpPingAverage = 0;
+        tcpPingDeviation = 0;
+        udpPingPackets = 0;
+        udpPingAverage = 0;
+        udpPingDeviation = 0;
+    }
+
+    public void dispose() {
+        close();
+        eventExecutor.close();
+        pingScheduler.close();
+        removeAllEventListeners();
     }
 }

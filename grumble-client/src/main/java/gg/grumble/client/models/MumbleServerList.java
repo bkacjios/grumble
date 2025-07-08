@@ -10,8 +10,8 @@ import java.util.List;
 public class MumbleServerList {
     @JacksonXmlElementWrapper(useWrapping = false)
     @JacksonXmlProperty(localName = "server")
-    private List<MumbleServer> server;
+    private List<MumbleServer> servers;
 
-    public List<MumbleServer> getServer() { return server; }
-    public void setServer(List<MumbleServer> server) { this.server = server; }
+    public List<MumbleServer> getServers() { return servers; }
+    public void setServers(List<MumbleServer> servers) { this.servers = servers; }
 }

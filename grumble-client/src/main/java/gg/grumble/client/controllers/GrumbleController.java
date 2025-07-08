@@ -2,6 +2,7 @@ package gg.grumble.client.controllers;
 
 import gg.grumble.client.audio.OpenALOutput;
 import gg.grumble.client.models.MumbleUserFx;
+import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleChannel;
@@ -9,6 +10,7 @@ import gg.grumble.core.models.MumbleUser;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
+import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.geometry.Pos;
@@ -23,6 +25,7 @@ import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -42,6 +45,8 @@ public class GrumbleController implements Initializable {
     @FXML
     public TextArea chatMessage;
 
+    private final FxmlLoaderService fxmlLoaderService;
+
     private final MumbleClient client;
 
     private final Map<MumbleChannel, TreeItem<Object>> channelNodeMap = new HashMap<>();
@@ -57,8 +62,10 @@ public class GrumbleController implements Initializable {
     private Image userServerMuteIcon;
     private Image userServerDeafIcon;
 
-    public GrumbleController() {
-        client = new MumbleClient("pi-two.lan");
+    public GrumbleController(FxmlLoaderService fxmlLoaderService) {
+        this.fxmlLoaderService = fxmlLoaderService;
+
+        client = new MumbleClient();
         client.setAudioOutput(new OpenALOutput());
         client.setVolume(0.1f);
     }
@@ -98,13 +105,17 @@ public class GrumbleController implements Initializable {
     public void initialize(URL location, ResourceBundle resources) {
         loadIcons();
 
-        client.connect();
+        client.connect("pi-two.lan");
 
         client.addEventListener(MumbleEvents.Connected.class, ignored -> {
             client.authenticate("Java-BOT");
         });
         client.addEventListener(MumbleEvents.Disconnected.class, event -> {
             LOG.warn("Disconnected from mumble server: {}", event.reason());
+            channelNodeMap.clear();
+            userFxMap.clear();
+            userNodeMap.clear();
+            Platform.runLater(() -> mumbleTree.setRoot(null));
         });
         client.addEventListener(MumbleEvents.ServerSync.class, ignored -> {
             LOG.info("Server synced");
@@ -520,5 +531,16 @@ public class GrumbleController implements Initializable {
         if (posCmp != 0) return posCmp;
 
         return ca.getName().compareToIgnoreCase(cb.getName());
+    }
+
+    public void onConnect(ActionEvent actionEvent) {
+        Stage stage = fxmlLoaderService.loadWindow("/fxml/connect.fxml");
+        stage.setTitle("Connect");
+        stage.show();
+        stage.centerOnScreen();
+    }
+
+    public void onDisconnect(ActionEvent actionEvent) {
+        client.close();
     }
 }

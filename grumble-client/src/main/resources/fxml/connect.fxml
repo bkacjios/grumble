@@ -7,7 +7,7 @@
 <VBox prefHeight="400.0" prefWidth="600.0" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="gg.grumble.client.controllers.ConnectController">
     <TreeTableView fx:id="treeTableView" prefHeight="400.0" prefWidth="600.0">
         <columns>
-            <TreeTableColumn fx:id="serverNameColumn" prefWidth="400.0" resizable="false" text="Server Name" />
+            <TreeTableColumn fx:id="nameColumn" prefWidth="400.0" resizable="false" text="Server Name" />
             <TreeTableColumn fx:id="pingColumn" prefWidth="100.0" resizable="false" text="Ping" />
             <TreeTableColumn fx:id="usersColumn" prefWidth="100.0" resizable="false" text="Users" />
         </columns>

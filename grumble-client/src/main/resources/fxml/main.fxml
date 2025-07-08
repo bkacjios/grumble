@@ -13,9 +13,9 @@
               <menus>
                 <Menu mnemonicParsing="false" text="Server">
                   <items>
-                    <MenuItem mnemonicParsing="false" text="Connect" />
+                    <MenuItem mnemonicParsing="false" text="Connect" onAction="#onConnect" />
                     <SeparatorMenuItem />
-                    <MenuItem mnemonicParsing="false" text="Disconnect" />
+                    <MenuItem mnemonicParsing="false" text="Disconnect" onAction="#onDisconnect" />
                     <MenuItem mnemonicParsing="false" text="Information" />
                     <MenuItem mnemonicParsing="false" text="Search" />
                     <MenuItem mnemonicParsing="false" text="Access Tokens" />
@@ -69,7 +69,7 @@
             </MenuBar>
             <HBox alignment="CENTER_LEFT" prefHeight="40.0" spacing="5.0">
                <children>
-                   <Button graphicTextGap="0" mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
+                   <Button graphicTextGap="0" mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;" onAction="#onConnect">
                        <graphic>
                            <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
                                <image>

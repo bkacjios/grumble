@@ -127,8 +127,7 @@ javafx {
 
 dependencies {
     // Spring Boot
-    implementation 'org.springframework.boot:spring-boot-starter'
-    implementation("org.springframework:spring-webflux")
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
     // grumble
     implementation project(":grumble-core")
@@ -148,6 +147,9 @@ dependencies {
     // lwjgl natives
     runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-windows"
     runtimeOnly "org.lwjgl:lwjgl-openal:3.3.6:natives-windows"
+
+    // Bonjour
+    implementation 'org.jmdns:jmdns:3.5.7'
 }
 
 test {

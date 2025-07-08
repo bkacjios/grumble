@@ -49,9 +49,7 @@ public class MumbleUDPConnection implements Closeable {
         }
 
         this.executor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r);
-            t.setName("MumbleUDPConnection-Thread");
-            return t;
+            return new Thread(r, "MumbleUDPConnection-Thread");
         });
     }
 
@@ -65,16 +63,6 @@ public class MumbleUDPConnection implements Closeable {
         while (buffer.hasRemaining()) {
             channel.send(buffer, target);
         }
-    }
-
-    @Override
-    public void close() throws IOException {
-        running = false;
-        selector.wakeup(); // interrupt select()
-        executor.shutdownNow();
-        selector.close();
-        channel.close();
-        LOG.info("UDP connection closed");
     }
 
     private void run() {
@@ -137,5 +125,19 @@ public class MumbleUDPConnection implements Closeable {
         }
 
         LOG.info("UDP listener thread exited");
+    }
+
+    @Override
+    public void close() {
+        running = false;
+        selector.wakeup();
+        executor.shutdownNow();
+        executor.close();
+        try {
+            selector.close();
+            channel.close();
+        } catch (IOException ignored) {
+        }
+        LOG.info("UDP connection closed");
     }
 }

@@ -92,8 +92,25 @@
     -fx-text-fill: #ffffff;
 }
 
-.scroll-bar, .scroll-bar .thumb {
-    -fx-background-color: #4a90e2;
+.scroll-bar:vertical  .decrement-button,
+.scroll-bar:vertical  .increment-button,
+.scroll-bar:horizontal.decrement-button,
+.scroll-bar:horizontal.increment-button {
+    -fx-background-color: #3b4857;
+    -fx-background-insets: 0;
+    -fx-padding: 2;
+    -fx-background-radius: 3;
+}
+
+.scroll-bar .decrement-button:hover,
+.scroll-bar .increment-button:hover {
+    -fx-background-color: derive(#3b4857, 10%);
+}
+
+.scroll-bar .decrement-arrow,
+.scroll-bar .increment-arrow {
+    -fx-background-color: #ffffff;
+    -fx-background-insets: 0;
 }
 
 .tab-pane {

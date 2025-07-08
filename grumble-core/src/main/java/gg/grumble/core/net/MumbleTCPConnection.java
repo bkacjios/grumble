@@ -22,13 +22,14 @@ public class MumbleTCPConnection implements Closeable {
     private final BiConsumer<Integer, byte[]> onFrameReceived;
     private final Consumer<String> onDisconnected;
 
-    private SocketChannel channel;
-    private SSLEngine sslEngine;
-    private Selector selector;
     private final ExecutorService executor;
     private final BlockingQueue<ByteBuffer> sendQueue = new LinkedBlockingQueue<>();
     private final ByteBuffer netOutBuffer = ByteBuffer.allocate(32768);
     private final ByteBuffer netInBuffer = ByteBuffer.allocate(32768);
+
+    private SocketChannel channel;
+    private SSLEngine sslEngine;
+    private Selector selector;
     private boolean handshakeComplete = false;
 
     public MumbleTCPConnection(String hostname,
@@ -42,9 +43,7 @@ public class MumbleTCPConnection implements Closeable {
         this.onFrameReceived = onFrameReceived;
         this.onDisconnected = onDisconnected;
         this.executor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r);
-            t.setName("MumbleTCPConnection-Thread");
-            return t;
+            return new Thread(r, "MumbleTCPConnection-Thread");
         });
     }
 
@@ -87,6 +86,9 @@ public class MumbleTCPConnection implements Closeable {
     private void runLoop() throws IOException {
         while (!Thread.currentThread().isInterrupted()) {
             selector.select();
+
+            if (!selector.isOpen()) break;
+
             for (SelectionKey key : selector.selectedKeys()) {
                 if (!key.isValid()) continue;
 
@@ -106,6 +108,9 @@ public class MumbleTCPConnection implements Closeable {
             }
             selector.selectedKeys().clear();
         }
+
+        LOG.info("TCP listener thread exited");
+        onDisconnected.accept("Disconnected");
     }
 
     private final ByteBuffer appInBuffer = ByteBuffer.allocate(32768);
@@ -241,10 +246,17 @@ public class MumbleTCPConnection implements Closeable {
     public void close() {
         try {
             if (channel != null && channel.isOpen()) channel.close();
-        } catch (IOException ignored) {
-        }
+            if (selector != null && selector.isOpen()) selector.close();
+        } catch (IOException ignored) {}
+
         wakeupSelector();
         executor.shutdownNow();
+        executor.close();
+
+        handshakeComplete = false;
+        netInBuffer.clear();
+        netOutBuffer.clear();
+        appInBuffer.clear();
     }
 
     private void wakeupSelector() {
