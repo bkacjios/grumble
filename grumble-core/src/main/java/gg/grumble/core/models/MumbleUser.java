@@ -67,6 +67,9 @@ public class MumbleUser {
         if (state.hasPrioritySpeaker()) this.prioritySpeaker = state.getPrioritySpeaker();
         if (state.hasRecording()) this.recording = state.getRecording();
 
+        if (this.selfDeaf) this.selfMute = true;
+        if (this.deaf) this.mute = true;
+
         if (state.hasComment()) this.comment = state.getComment();
         if (state.hasHash()) this.hash = state.getHash();
 
@@ -202,6 +205,45 @@ public class MumbleUser {
         textMessage.setMessage(message);
         textMessage.addSession((int) this.session);
         client.send(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
+    }
+
+    public void setMute(boolean mute) {
+        MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
+        state.setSession((int) this.session);
+        state.setMute(mute);
+        client.send(MumbleMessageType.USER_STATE, state.build());
+    }
+
+    public void setDeaf(boolean deaf) {
+        MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
+        state.setSession((int) this.session);
+        state.setDeaf(deaf);
+        client.send(MumbleMessageType.USER_STATE, state.build());
+    }
+
+    public void setSelfMute(boolean mute) {
+        MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
+        state.setSession((int) this.session);
+        state.setSelfMute(mute);
+        client.send(MumbleMessageType.USER_STATE, state.build());
+    }
+
+    public void setSelfDeaf(boolean deaf) {
+        MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
+        state.setSession((int) this.session);
+        state.setSelfDeaf(deaf);
+        client.send(MumbleMessageType.USER_STATE, state.build());
+    }
+
+    public void requestStats() {
+        requestStats(false);
+    }
+
+    public void requestStats(boolean statsOnly) {
+        MumbleProto.UserStats.Builder stats = MumbleProto.UserStats.newBuilder();
+        stats.setSession((int) this.session);
+        stats.setStatsOnly(statsOnly);
+        client.send(MumbleMessageType.USER_STATS, stats.build());
     }
 
     public boolean isAutoGainEnabled() {

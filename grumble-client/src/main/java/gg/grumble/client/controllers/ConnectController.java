@@ -11,22 +11,26 @@ import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.CacheHint;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableView;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.util.Callback;
 import org.springframework.stereotype.Component;
 
 import java.net.URL;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
-import java.util.ResourceBundle;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Component
 public class ConnectController implements Initializable {
+
+    private static final int ICON_SIZE = 20;
 
     @FXML
     private TreeTableView<ServerEntry> treeTableView;
@@ -66,18 +70,68 @@ public class ConnectController implements Initializable {
         };
     }
 
+    private ImageView fitIcon(Image img) {
+        ImageView iv = new ImageView(img);
+        iv.setFitWidth(ICON_SIZE);
+        iv.setFitHeight(ICON_SIZE);
+        iv.setPreserveRatio(true);
+        iv.setSmooth(true);
+        iv.setCache(true);
+        iv.setCacheHint(CacheHint.SPEED);
+        return iv;
+    }
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
+        treeTableView.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+
         // bind columns to ServerEntry properties
         nameColumn.setCellValueFactory(c -> c.getValue().getValue().nameProperty());
         pingColumn.setCellValueFactory(c -> c.getValue().getValue().pingProperty().asObject());
         usersColumn.setCellValueFactory(c -> c.getValue().getValue().usersProperty().asObject());
+        nameColumn.setCellFactory(col -> new TreeTableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+
+                if (empty) {
+                    setText(null);
+                    setGraphic(null);
+                } else {
+                    // always fetch the *current* treeItem for this row
+                    TreeItem<ServerEntry> ti = getTreeTableView().getTreeItem(getIndex());
+                    setText(item);
+                    setAlignment(Pos.CENTER_LEFT);
+
+                    // if it's one of our top-level category nodes, re-apply its icon
+                    if (ti != null && ti.getParent() == treeTableView.getRoot()) {
+                        setGraphic(ti.getGraphic());
+                        setPadding(new Insets(0, 0, 0, -20));
+                    } else {
+                        // normal leaf rows get no graphic
+                        setGraphic(null);
+                        setPadding(new Insets(0, 0, 0, 0));
+                    }
+                }
+            }
+        });
         pingColumn.setCellFactory(createBlankCellFactory());
         usersColumn.setCellFactory(createBlankCellFactory());
 
         // create a hidden root so we can show three top-level categories
         TreeItem<ServerEntry> hiddenRoot = new TreeItem<>(new ServerEntry("ROOT"));
         hiddenRoot.setExpanded(true);
+
+        Image favImg = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/emblem-favorite.png")),
+                ICON_SIZE, ICON_SIZE, true, true);
+        Image lanImg = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/network-workgroup.png")),
+                ICON_SIZE, ICON_SIZE, true, true);
+        Image netImg = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/connect.png")),
+                ICON_SIZE, ICON_SIZE, true, true);
+
+        favorites.setGraphic(fitIcon(favImg));
+        lan.setGraphic(fitIcon(lanImg));
+        internet.setGraphic(fitIcon(netImg));
 
         // the three main nodes
         hiddenRoot.getChildren().addAll(Arrays.asList(favorites, lan, internet));

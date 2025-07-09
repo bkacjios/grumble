@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.*?>
+
+<VBox prefHeight="340.0" prefWidth="390.0" spacing="10.0" stylesheets="@../styles/dark-theme.css" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="gg.grumble.client.controllers.UserStatsController">
+    <children>
+        <GridPane hgap="4" styleClass="stats-pane" vgap="4" VBox.vgrow="ALWAYS">
+            <columnConstraints>
+                <ColumnConstraints hgrow="ALWAYS" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+            </columnConstraints>
+            <children>
+                <Label text="Ping Statistics" GridPane.columnSpan="4">
+                    <font>
+                        <Font size="16.0" />
+                    </font>
+                </Label>
+                <Label text="TCP (Control)" GridPane.rowIndex="2" />
+                <Label text="UDP (Voice)" GridPane.rowIndex="3" />
+                <Label text="Pings received" GridPane.columnSpan="2" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label text="Average ping" GridPane.columnIndex="2" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label text="Ping deviation" GridPane.columnIndex="3" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label fx:id="pingsReceivedTcp" text="0" GridPane.columnIndex="1" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="pingsReceivedUdp" text="0" GridPane.columnIndex="1" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+                <Label fx:id="averagePingTcp" text="0" GridPane.columnIndex="2" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="averagePingUdp" text="0" GridPane.columnIndex="2" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+                <Label fx:id="pingDeviationTcp" text="0" GridPane.columnIndex="3" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="pingDeviationUdp" text="0" GridPane.columnIndex="3" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+            </children>
+            <rowConstraints>
+                <RowConstraints />
+                <RowConstraints />
+                <RowConstraints />
+                <RowConstraints />
+            </rowConstraints>
+        </GridPane>
+        <GridPane hgap="4.0" styleClass="stats-pane" vgap="4.0" VBox.vgrow="ALWAYS">
+            <columnConstraints>
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="SOMETIMES" />
+            </columnConstraints>
+            <children>
+                <Label text="UDP Network statistics" GridPane.columnSpan="7">
+                    <font>
+                        <Font size="16.0" />
+                    </font>
+                </Label>
+                <Label text="Good" GridPane.columnIndex="1" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label text="Late" GridPane.columnIndex="2" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label text="From Client" GridPane.halignment="LEFT" GridPane.rowIndex="2" />
+                <Label text="To Client" GridPane.halignment="LEFT" GridPane.rowIndex="3" />
+                <Label text="\%" GridPane.columnIndex="3" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label text="Lost" GridPane.columnIndex="4" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label text="\%" GridPane.columnIndex="5" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label text="Resync" GridPane.columnIndex="6" GridPane.halignment="RIGHT" GridPane.rowIndex="1" />
+                <Label fx:id="fromGood" text="0" GridPane.columnIndex="1" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="fromLate" text="0" GridPane.columnIndex="2" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="fromLatePercent" text="0" GridPane.columnIndex="3" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="fromLost" text="0" GridPane.columnIndex="4" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="fromLostPercent" text="0" GridPane.columnIndex="5" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="fromResync" text="0" GridPane.columnIndex="6" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+                <Label fx:id="toGood" text="0" GridPane.columnIndex="1" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+                <Label fx:id="toLate" text="0" GridPane.columnIndex="2" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+                <Label fx:id="toLatePercent" text="0" GridPane.columnIndex="3" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+                <Label fx:id="toLost" text="0" GridPane.columnIndex="4" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+                <Label fx:id="toLostPercent" text="0" GridPane.columnIndex="5" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+                <Label fx:id="toResync" text="0" GridPane.columnIndex="6" GridPane.halignment="RIGHT" GridPane.rowIndex="3" />
+            </children>
+            <rowConstraints>
+                <RowConstraints />
+                <RowConstraints />
+                <RowConstraints />
+                <RowConstraints />
+            </rowConstraints>
+        </GridPane>
+        <GridPane hgap="4" styleClass="stats-pane" vgap="4" VBox.vgrow="ALWAYS">
+            <columnConstraints>
+                <ColumnConstraints hgrow="SOMETIMES" />
+                <ColumnConstraints hgrow="ALWAYS" />
+            </columnConstraints>
+            <children>
+                <Label text="Bandwidth" GridPane.columnSpan="2">
+                    <font>
+                        <Font size="16.0" />
+                    </font>
+                </Label>
+                <Label text="Connection time" GridPane.rowIndex="1" />
+                <Label text="Bandwidth" GridPane.rowIndex="2" />
+                <Label fx:id="connectionTime" text="0d 0h 0m 0s online (0s idle)" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+                <Label fx:id="bandwidth" text="0.0 kbit/s" GridPane.columnIndex="1" GridPane.rowIndex="2" />
+            </children>
+            <rowConstraints>
+                <RowConstraints />
+                <RowConstraints />
+                <RowConstraints />
+            </rowConstraints>
+        </GridPane>
+    </children>
+    <padding>
+        <Insets bottom="10.0" left="10.0" right="10.0" top="10.0" />
+    </padding>
+</VBox>

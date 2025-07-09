@@ -3,6 +3,7 @@ package gg.grumble.client.controllers;
 import gg.grumble.client.audio.OpenALOutput;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
+import gg.grumble.client.utils.StageAware;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleChannel;
@@ -25,7 +26,9 @@ import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.util.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -35,7 +38,7 @@ import java.util.*;
 import java.util.stream.Stream;
 
 @Component
-public class GrumbleController implements Initializable {
+public class GrumbleController implements Initializable, StageAware {
     private static final Logger LOG = LoggerFactory.getLogger(GrumbleController.class);
 
     private static final int ICON_SIZE = 20;
@@ -54,6 +57,7 @@ public class GrumbleController implements Initializable {
     private final Map<MumbleUser, TreeItem<Object>> userNodeMap = new HashMap<>();
 
     // Icons
+    private Image channelIcon;
     private Image userIcon;
     private Image userSpeakingIcon;
     private Image userSpeakingMutedIcon;
@@ -61,6 +65,9 @@ public class GrumbleController implements Initializable {
     private Image userSelfDeafIcon;
     private Image userServerMuteIcon;
     private Image userServerDeafIcon;
+    private Image userAuthenticatedIcon;
+
+    private Stage stage;
 
     public GrumbleController(FxmlLoaderService fxmlLoaderService) {
         this.fxmlLoaderService = fxmlLoaderService;
@@ -71,6 +78,10 @@ public class GrumbleController implements Initializable {
     }
 
     private void loadIcons() {
+        channelIcon = new Image(
+                Objects.requireNonNull(getClass().getResource("/icons/broadcast-solid.png")).toExternalForm(),
+                ICON_SIZE, ICON_SIZE, true, true
+        );
         userIcon = new Image(
                 Objects.requireNonNull(getClass().getResource("/icons/talking_off.png")).toExternalForm(),
                 ICON_SIZE, ICON_SIZE, true, true
@@ -99,6 +110,15 @@ public class GrumbleController implements Initializable {
                 Objects.requireNonNull(getClass().getResource("/icons/deafened_server.png")).toExternalForm(),
                 ICON_SIZE, ICON_SIZE, true, true
         );
+        userAuthenticatedIcon = new Image(
+                Objects.requireNonNull(getClass().getResource("/icons/authenticated.png")).toExternalForm(),
+                ICON_SIZE, ICON_SIZE, true, true
+        );
+    }
+
+    @Override
+    public void setStage(Stage stage) {
+        this.stage = stage;
     }
 
     @Override
@@ -170,23 +190,28 @@ public class GrumbleController implements Initializable {
                 Bindings.createStringBinding(() -> {
                             TreeItem<Object> sel = mumbleTree.getSelectionModel().getSelectedItem();
                             if (sel == null || sel.getValue() == null) {
-                                return "Send message";
+                                return "Type message";
                             }
                             Object v = sel.getValue();
                             String name;
+                            String type;
                             if (v instanceof MumbleUserFx user) {
                                 name = user.getName();
+                                type = "user";
                             } else if (v instanceof MumbleChannel ch) {
                                 name = ch.getName();
+                                type = "channel";
                             } else {
                                 name = v.toString();
+                                type = "unknown";
                             }
-                            return "Send message to " + name;
+                            return String.format("Type message to %s '%s' here", type, name);
                         },
                         mumbleTree.getSelectionModel().selectedItemProperty()
                 ));
 
         mumbleTree.setCellFactory(ignored -> new TreeCell<>() {
+            private final ImageView channelView = new ImageView(channelIcon);
             private final ImageView user = new ImageView(userIcon);
             private final ImageView userSpeaking = new ImageView(userSpeakingIcon);
             private final ImageView userSpeakingMuted = new ImageView(userSpeakingMutedIcon);
@@ -194,11 +219,28 @@ public class GrumbleController implements Initializable {
             private final ImageView userSelfDeaf = new ImageView(userSelfDeafIcon);
             private final ImageView userServerMute = new ImageView(userServerMuteIcon);
             private final ImageView userServerDeaf = new ImageView(userServerDeafIcon);
+            private final ImageView userAuthenticated = new ImageView(userAuthenticatedIcon);
+
+            private final ContextMenu channelMenu = new ContextMenu(
+                    new MenuItem("Add…"),
+                    new MenuItem("Edit.."),
+                    new MenuItem("Remove.."),
+                    new SeparatorMenuItem(),
+                    new MenuItem("Link"),
+                    new MenuItem("Unlink"),
+                    new MenuItem("Unlink All"),
+                    new SeparatorMenuItem(),
+                    new MenuItem("Copy URL"),
+                    new MenuItem("Send Message..")
+            );
+            private final ContextMenu userMenu = new ContextMenu(
+                    new MenuItem("Private Message"),
+                    new MenuItem("Kick from Channel")
+            );
 
             {
-                Stream.of(user, userSpeaking, userSpeakingMuted,
-                        userSelfMute, userSelfDeaf,
-                        userServerDeaf,userServerMute).forEach(view -> {
+                Stream.of(channelView, user, userSpeaking, userSpeakingMuted, userSelfMute, userSelfDeaf,
+                        userServerDeaf,userServerMute, userAuthenticated).forEach(view -> {
                     view.setFitWidth(ICON_SIZE);
                     view.setFitHeight(ICON_SIZE);
                 });
@@ -246,13 +288,14 @@ public class GrumbleController implements Initializable {
                 if (item instanceof MumbleChannel channel) {
                     updateMumbleChannel(channel);
                 } else if (item instanceof MumbleUserFx userFx) {
+                    setContextMenu(createMumbleUserContextMenu(userFx));
                     updateMumbleUserFx(userFx);
                 }
             }
 
             private void updateMumbleChannel(MumbleChannel channel) {
                 setText(channel.getName());
-                setGraphic(null);
+                setGraphic(channelView);
                 setContentDisplay(ContentDisplay.LEFT);
             }
 
@@ -304,14 +347,108 @@ public class GrumbleController implements Initializable {
                 serverDeaf.visibleProperty().bind(userFx.deafProperty());
                 serverDeaf.managedProperty().bind(userFx.deafProperty());
 
+                ImageView authenticated = new ImageView(userAuthenticatedIcon);
+                authenticated.setFitWidth(ICON_SIZE);
+                authenticated.setFitHeight(ICON_SIZE);
+                authenticated.visibleProperty().bind(userFx.authenticatedProperty());
+                authenticated.managedProperty().bind(userFx.authenticatedProperty());
+
                 // 5) Assemble
-                HBox box = new HBox(4, speakView, nameLabel, spacer, selfMute, selfDeaf, serverMute, serverDeaf);
+                HBox box = new HBox(4, speakView, nameLabel, spacer, selfMute, selfDeaf, serverMute, serverDeaf, authenticated);
                 box.setAlignment(Pos.CENTER);
                 setText(null);
                 setGraphic(box);
                 setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
             }
         });
+    }
+
+    private ContextMenu createMumbleUserContextMenu(MumbleUserFx userFx) {
+        // build the menu *for this user*:
+        CheckMenuItem muteItem = new CheckMenuItem("Mute");
+        muteItem.selectedProperty().bindBidirectional(userFx.muteProperty());
+
+        CheckMenuItem deafItem = new CheckMenuItem("Deafen");
+        deafItem.selectedProperty().bindBidirectional(userFx.deafProperty());
+
+        MenuItem priorityItem = new MenuItem("Priority Speaker");
+        priorityItem.setDisable(true);
+
+        SeparatorMenuItem sep1 = new SeparatorMenuItem();
+
+        CheckMenuItem localMuteItem = new CheckMenuItem("Local Mute");
+        localMuteItem.selectedProperty().bindBidirectional(userFx.localMuteProperty());
+
+        CheckMenuItem ignoreItem = new CheckMenuItem("Ignore Messages");
+        // ignoreItem.selectedProperty().bindBidirectional(userFx.ignoreMessagesProperty());
+
+        SeparatorMenuItem sep2 = new SeparatorMenuItem();
+
+        // === volume slider row, label above slider ===
+        Label volTitle = new Label("Local Volume Adjustment:");
+
+        Slider volSlider = new Slider(-30, 30, userFx.localVolumeProperty().get());
+        volSlider.setPrefWidth(120);
+        volSlider.valueProperty().bindBidirectional(userFx.localVolumeProperty());
+
+        Label volValue = new Label();
+        volValue.textProperty().bind(userFx.localVolumeProperty().asString("%.0f dB"));
+
+        HBox sliderRow = new HBox(4, volSlider, volValue);
+        sliderRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox volBox = new VBox(2, volTitle, sliderRow);
+        volBox.setAlignment(Pos.CENTER_LEFT);
+
+        CustomMenuItem volItem = new CustomMenuItem(volBox);
+        volItem.setHideOnClick(false);
+
+
+        SeparatorMenuItem sep3 = new SeparatorMenuItem();
+
+        MenuItem nicknameItem = new MenuItem("Set Nickname…");
+        nicknameItem.setOnAction(evt -> {
+            // TODO show nickname dialog
+        });
+
+        SeparatorMenuItem sep4 = new SeparatorMenuItem();
+
+        MenuItem sendMsgItem = new MenuItem("Send Message…");
+        sendMsgItem.setOnAction(evt -> {
+            // TODO open chat window
+        });
+
+        MenuItem infoItem = new MenuItem("Information");
+        infoItem.setOnAction(evt -> {
+            Pair<Stage, UserStatsController> stageController = fxmlLoaderService.createWindow("/fxml/userStats.fxml");
+            Stage stage = stageController.getKey();
+            UserStatsController controller = stageController.getValue();
+            controller.setClientSession(this.client, userFx.getUser());
+            stage.show();
+            stage.centerOnScreen();
+        });
+
+        MenuItem addFriendItem = new MenuItem("Add Friend");
+        addFriendItem.setOnAction(evt -> {
+            // TODO mark as friend
+        });
+
+        return new ContextMenu(
+                muteItem,
+                deafItem,
+                priorityItem,
+                sep1,
+                localMuteItem,
+                ignoreItem,
+                sep2,
+                volItem,
+                sep3,
+                nicknameItem,
+                sep4,
+                sendMsgItem,
+                infoItem,
+                addFriendItem
+        );
     }
 
     private void initializeChat() {
@@ -534,7 +671,8 @@ public class GrumbleController implements Initializable {
     }
 
     public void onConnect(ActionEvent actionEvent) {
-        Stage stage = fxmlLoaderService.loadWindow("/fxml/connect.fxml");
+        Pair<Stage, ConnectController> stageController = fxmlLoaderService.createWindow("/fxml/connect.fxml");
+        Stage stage = stageController.getKey();
         stage.setTitle("Connect");
         stage.show();
         stage.centerOnScreen();

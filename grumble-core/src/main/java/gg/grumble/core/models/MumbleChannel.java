@@ -130,6 +130,33 @@ public class MumbleChannel {
 		client.send(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
 	}
 
+	public void createChannel(String name) {
+		createChannel(name, "", 0, 0, false);
+	}
+
+	public void createChannel(String name, boolean temporary) {
+		createChannel(name, "", 0, 0, temporary);
+	}
+
+	public void createChannel(String name, String description) {
+		createChannel(name, description, 0, 0, false);
+	}
+
+	public void createChannel(String name, String description, boolean temporary) {
+		createChannel(name, description, 0, 0, temporary);
+	}
+
+	public void createChannel(String name, String description, int position, long maxUsers, boolean temporary) {
+		MumbleProto.ChannelState.Builder channel = MumbleProto.ChannelState.newBuilder();
+		channel.setParent((int) this.channelId);
+		channel.setName(name);
+		channel.setDescription(description);
+		channel.setPosition(position);
+		channel.setMaxUsers((int) maxUsers);
+		channel.setTemporary(temporary);
+		client.send(MumbleMessageType.CHANNEL_STATE, channel.build());
+	}
+
 	@SuppressWarnings("unused")
 	public MumbleChannel resolveRelativePath(String path) {
 		if (path == null || path.isEmpty()) return this;

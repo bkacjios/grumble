@@ -5,146 +5,142 @@
 <?import javafx.scene.image.*?>
 <?import javafx.scene.layout.*?>
 
-<AnchorPane prefHeight="400.0" prefWidth="600.0" stylesheets="@../styles/dark-theme.css" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="gg.grumble.client.controllers.GrumbleController">
-   <children>
-      <VBox>
-         <children>
-            <MenuBar>
-              <menus>
-                <Menu mnemonicParsing="false" text="Server">
-                  <items>
-                    <MenuItem mnemonicParsing="false" text="Connect" onAction="#onConnect" />
-                    <SeparatorMenuItem />
-                    <MenuItem mnemonicParsing="false" text="Disconnect" onAction="#onDisconnect" />
-                    <MenuItem mnemonicParsing="false" text="Information" />
-                    <MenuItem mnemonicParsing="false" text="Search" />
-                    <MenuItem mnemonicParsing="false" text="Access Tokens" />
-                    <MenuItem mnemonicParsing="false" text="Registered Users" />
-                    <MenuItem mnemonicParsing="false" text="Ban List" />
-                    <SeparatorMenuItem />
-                    <MenuItem mnemonicParsing="false" text="Hide Mumble" />
-                    <MenuItem mnemonicParsing="false" text="Quit" />
-                  </items>
-                </Menu>
-                <Menu mnemonicParsing="false" text="Self">
-                  <items>
-                    <MenuItem mnemonicParsing="false" text="Mute Self" />
-                    <MenuItem mnemonicParsing="false" text="Deafen Self" />
-                    <MenuItem mnemonicParsing="false" text="Priority Speaker" />
-                     <SeparatorMenuItem />
-                    <MenuItem mnemonicParsing="false" text="Record..." />
-                     <SeparatorMenuItem />
-                     <MenuItem mnemonicParsing="false" text="Change Comment..." />
-                     <MenuItem mnemonicParsing="false" text="Change Avatar..." />
-                     <MenuItem mnemonicParsing="false" text="Remove Avatar" />
-                     <SeparatorMenuItem />
-                     <MenuItem mnemonicParsing="false" text="Register..." />
-                     <MenuItem mnemonicParsing="false" text="Audio Statistics" />
-                  </items>
-                </Menu>
-                 <Menu mnemonicParsing="false" text="Configure">
-                    <items>
-                       <MenuItem mnemonicParsing="false" text="Settings" />
-                       <MenuItem mnemonicParsing="false" text="Audio Wizard..." />
-                       <MenuItem mnemonicParsing="false" text="Certificate Wizard..." />
-                       <SeparatorMenuItem />
-                       <MenuItem mnemonicParsing="false" text="Text-To-Speech" />
-                       <SeparatorMenuItem />
-                       <MenuItem mnemonicParsing="false" text="Minimal View" />
-                       <MenuItem mnemonicParsing="false" text="Channel Filter" />
-                       <MenuItem mnemonicParsing="false" text="Talking UI" />
-                    </items>
-                 </Menu>
-                 <Menu mnemonicParsing="false" text="Help">
-                    <items>
-                       <MenuItem mnemonicParsing="false" text="What's This?" />
-                       <SeparatorMenuItem />
-                       <MenuItem mnemonicParsing="false" text="About" />
-                       <MenuItem mnemonicParsing="false" text="About JavaFX" />
-                       <SeparatorMenuItem />
-                       <MenuItem mnemonicParsing="false" text="Check for Updates" />
-                    </items>
-                 </Menu>
-              </menus>
-            </MenuBar>
-            <HBox alignment="CENTER_LEFT" prefHeight="40.0" spacing="5.0">
-               <children>
-                   <Button graphicTextGap="0" mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;" onAction="#onConnect">
-                       <graphic>
-                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
-                               <image>
-                                   <Image url="@../icons/connect.png" />
-                               </image>
-                           </ImageView>
-                       </graphic>
-                   </Button>
-                   <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
-                       <graphic>
-                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
-                               <image>
-                                   <Image url="@../icons/info.png" />
-                               </image>
-                           </ImageView>
-                       </graphic>
-                   </Button>
-                   <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
-                       <graphic>
-                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
-                               <image>
-                                   <Image url="@../icons/input_microphone.png" />
-                               </image>
-                           </ImageView>
-                       </graphic>
-                   </Button>
-                   <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
-                       <graphic>
-                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
-                               <image>
-                                   <Image url="@../icons/self_undeafened.png" />
-                               </image>
-                           </ImageView>
-                       </graphic>
-                   </Button>
-                   <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
-                       <graphic>
-                           <ImageView cache="true" fitHeight="30" fitWidth="30" preserveRatio="true">
-                               <image>
-                                   <Image url="@../icons/record.png" />
-                               </image>
-                           </ImageView>
-                       </graphic>
-                   </Button>
-               </children>
-               <VBox.margin>
-                  <Insets />
-               </VBox.margin>
-               <padding>
-                  <Insets bottom="5.0" left="5.0" right="5.0" top="5.0" />
-               </padding>
-            </HBox>
-            <SplitPane dividerPositions="0.4">
-               <items>
-                  <VBox>
-                     <children>
-                        <SplitPane dividerPositions="0.9" orientation="VERTICAL" VBox.vgrow="ALWAYS">
-                           <items>
-                              <VBox />
-                              <BorderPane>
-                                 <center>
-                                    <TextArea fx:id="chatMessage" />
-                                 </center>
-                                 <opaqueInsets>
-                                    <Insets />
-                                 </opaqueInsets>
-                              </BorderPane>
-                           </items>
-                        </SplitPane>
-                     </children>
-                  </VBox>
-                  <TreeView fx:id="mumbleTree" />
-               </items>
-            </SplitPane>
-         </children>
-      </VBox>
-   </children>
-</AnchorPane>
+<VBox prefHeight="400.0" prefWidth="600.0" stylesheets="@../styles/dark-theme.css" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="gg.grumble.client.controllers.GrumbleController">
+    <children>
+    <MenuBar>
+      <menus>
+        <Menu mnemonicParsing="false" text="Server">
+          <items>
+            <MenuItem mnemonicParsing="false" onAction="#onConnect" text="Connect" />
+            <SeparatorMenuItem />
+            <MenuItem mnemonicParsing="false" onAction="#onDisconnect" text="Disconnect" />
+            <MenuItem mnemonicParsing="false" text="Information" />
+            <MenuItem mnemonicParsing="false" text="Search" />
+            <MenuItem mnemonicParsing="false" text="Access Tokens" />
+            <MenuItem mnemonicParsing="false" text="Registered Users" />
+            <MenuItem mnemonicParsing="false" text="Ban List" />
+            <SeparatorMenuItem />
+            <MenuItem mnemonicParsing="false" text="Hide Mumble" />
+            <MenuItem mnemonicParsing="false" text="Quit" />
+          </items>
+        </Menu>
+        <Menu mnemonicParsing="false" text="Self">
+          <items>
+            <MenuItem mnemonicParsing="false" text="Mute Self" />
+            <MenuItem mnemonicParsing="false" text="Deafen Self" />
+            <MenuItem mnemonicParsing="false" text="Priority Speaker" />
+             <SeparatorMenuItem />
+            <MenuItem mnemonicParsing="false" text="Record..." />
+             <SeparatorMenuItem />
+             <MenuItem mnemonicParsing="false" text="Change Comment..." />
+             <MenuItem mnemonicParsing="false" text="Change Avatar..." />
+             <MenuItem mnemonicParsing="false" text="Remove Avatar" />
+             <SeparatorMenuItem />
+             <MenuItem mnemonicParsing="false" text="Register..." />
+             <MenuItem mnemonicParsing="false" text="Audio Statistics" />
+          </items>
+        </Menu>
+         <Menu mnemonicParsing="false" text="Configure">
+            <items>
+               <MenuItem mnemonicParsing="false" text="Settings" />
+               <MenuItem mnemonicParsing="false" text="Audio Wizard..." />
+               <MenuItem mnemonicParsing="false" text="Certificate Wizard..." />
+               <SeparatorMenuItem />
+               <MenuItem mnemonicParsing="false" text="Text-To-Speech" />
+               <SeparatorMenuItem />
+               <MenuItem mnemonicParsing="false" text="Minimal View" />
+               <MenuItem mnemonicParsing="false" text="Channel Filter" />
+               <MenuItem mnemonicParsing="false" text="Talking UI" />
+            </items>
+         </Menu>
+         <Menu mnemonicParsing="false" text="Help">
+            <items>
+               <MenuItem mnemonicParsing="false" text="What's This?" />
+               <SeparatorMenuItem />
+               <MenuItem mnemonicParsing="false" text="About" />
+               <MenuItem mnemonicParsing="false" text="About JavaFX" />
+               <SeparatorMenuItem />
+               <MenuItem mnemonicParsing="false" text="Check for Updates" />
+            </items>
+         </Menu>
+      </menus>
+    </MenuBar>
+    <HBox alignment="CENTER_LEFT" prefHeight="40.0" spacing="5.0">
+       <children>
+           <Button graphicTextGap="0" mnemonicParsing="false" onAction="#onConnect" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
+               <graphic>
+                   <ImageView cache="true">
+                       <image>
+                           <Image preserveRatio="true" requestedHeight="30" requestedWidth="30" smooth="true" url="@../icons/connect.png" />
+                       </image>
+                   </ImageView>
+               </graphic>
+           </Button>
+           <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
+               <graphic>
+                   <ImageView cache="true">
+                       <image>
+                           <Image preserveRatio="true" requestedHeight="30" requestedWidth="30" smooth="true" url="@../icons/info.png" />
+                       </image>
+                   </ImageView>
+               </graphic>
+           </Button>
+           <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
+               <graphic>
+                   <ImageView cache="true">
+                       <image>
+                           <Image preserveRatio="true" requestedHeight="30" requestedWidth="30" smooth="true" url="@../icons/input_microphone.png" />
+                       </image>
+                   </ImageView>
+               </graphic>
+           </Button>
+           <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
+               <graphic>
+                   <ImageView cache="true">
+                       <image>
+                           <Image preserveRatio="true" requestedHeight="30" requestedWidth="30" smooth="true" url="@../icons/self_undeafened.png" />
+                       </image>
+                   </ImageView>
+               </graphic>
+           </Button>
+           <Button mnemonicParsing="false" prefHeight="30.0" prefWidth="30.0" style="-fx-padding: 2;">
+               <graphic>
+                   <ImageView cache="true">
+                       <image>
+                           <Image preserveRatio="true" requestedHeight="30" requestedWidth="30" smooth="true" url="@../icons/record.png" />
+                       </image>
+                   </ImageView>
+               </graphic>
+           </Button>
+       </children>
+       <VBox.margin>
+          <Insets />
+       </VBox.margin>
+       <padding>
+          <Insets bottom="5.0" left="5.0" right="5.0" top="5.0" />
+       </padding>
+    </HBox>
+    <SplitPane dividerPositions="0.4" VBox.vgrow="ALWAYS">
+       <items>
+          <VBox>
+             <children>
+                <SplitPane dividerPositions="0.9" orientation="VERTICAL" styleClass="inner-split" VBox.vgrow="ALWAYS">
+                   <items>
+                      <VBox />
+                      <BorderPane>
+                         <center>
+                            <TextArea fx:id="chatMessage" />
+                         </center>
+                         <opaqueInsets>
+                            <Insets />
+                         </opaqueInsets>
+                      </BorderPane>
+                   </items>
+                </SplitPane>
+             </children>
+          </VBox>
+          <TreeView fx:id="mumbleTree" />
+       </items>
+    </SplitPane>
+    </children>
+</VBox>

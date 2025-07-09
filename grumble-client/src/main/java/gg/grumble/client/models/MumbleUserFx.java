@@ -6,6 +6,8 @@ import javafx.beans.property.*;
 public class MumbleUserFx {
     private final MumbleUser user;
 
+    private final BooleanProperty authenticated = new SimpleBooleanProperty();
+    private final LongProperty userId = new SimpleLongProperty();
     private final StringProperty name = new SimpleStringProperty();
     private final BooleanProperty mute = new SimpleBooleanProperty();
     private final BooleanProperty deaf = new SimpleBooleanProperty();
@@ -13,6 +15,7 @@ public class MumbleUserFx {
     private final BooleanProperty selfMute = new SimpleBooleanProperty();
     private final BooleanProperty selfDeaf = new SimpleBooleanProperty();
     private final BooleanProperty localMute = new SimpleBooleanProperty();
+    private final FloatProperty localVolume = new SimpleFloatProperty();
     private final BooleanProperty prioritySpeaker = new SimpleBooleanProperty();
     private final BooleanProperty recording = new SimpleBooleanProperty();
     private final BooleanProperty speaking = new SimpleBooleanProperty();
@@ -25,6 +28,32 @@ public class MumbleUserFx {
 
     public MumbleUser getUser() {
         return user;
+    }
+
+    // authenticated
+    public BooleanProperty authenticatedProperty() {
+        return authenticated;
+    }
+
+    public boolean isAuthenticated() {
+        return authenticated.get();
+    }
+
+    public void setAuthenticated(boolean v) {
+        authenticated.set(v);
+    }
+
+    // userId
+    public LongProperty userIdProperty() {
+        return userId;
+    }
+
+    public long getUserId() {
+        return userId.get();
+    }
+
+    public void setUserId(long v) {
+        userId.set(v);
     }
 
     // name
@@ -105,6 +134,20 @@ public class MumbleUserFx {
         selfDeaf.set(v);
     }
 
+    // localVolume
+    public FloatProperty localVolumeProperty() {
+        return localVolume;
+    }
+
+    public float getLocalVolume() {
+        return localVolume.get();
+    }
+
+    public void setLocalVolume(float v) {
+        localVolume.set(v);
+    }
+
+
     // localMute
     public BooleanProperty localMuteProperty() {
         return localMute;
@@ -172,6 +215,9 @@ public class MumbleUserFx {
 
     // copy values from model
     public void refresh() {
+        long userId = user.getUserId();
+        setAuthenticated(userId > 0);
+        setUserId(userId);
         setName(user.getName());
         setMute(user.isMute());
         setDeaf(user.isDeaf());

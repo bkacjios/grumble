@@ -27,6 +27,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Predicate;
 
 import static gg.grumble.core.enums.MumbleAudioConfig.*;
 
@@ -111,6 +112,20 @@ public class MumbleClient implements Closeable {
 
     public <T extends MumbleEvents.MumbleEvent> void addEventListener(Class<T> eventType, MumbleEventListener<T> listener) {
         listeners.computeIfAbsent(eventType, k -> new ArrayList<>()).add(listener);
+    }
+
+    public <T extends MumbleEvents.MumbleEvent> MumbleEventListener<T> addEventListenerFiltered(
+            Class<T> eventType,
+            Predicate<T> filter,
+            MumbleEventListener<T> listener) {
+        // wrap in a predicate check
+        MumbleEventListener<T> wrapped = event -> {
+            if (filter.test(event)) {
+                listener.onEvent(event);
+            }
+        };
+        addEventListener(eventType, wrapped);
+        return wrapped;
     }
 
     @SuppressWarnings("unused")

@@ -2,14 +2,23 @@
     -fx-base: #2b2b2b;
     -fx-background: #2b2b2b;
     -fx-control-inner-background: #3c3f41;
-    -fx-accent: #4a90e2;
-    -fx-focus-color: #4a90e2;
+    -fx-accent: #3b4857;
+    -fx-focus-color: #3b4857;
     -fx-faint-focus-color: rgba(74, 144, 226, 0.2);
     -fx-text-fill: #ffffff;
+    -fx-font-size: 11pt;
 }
 
 .label, .text {
     -fx-text-fill: #ffffff;
+}
+
+.stats-pane {
+    -fx-background-color: #3c3f41;
+    -fx-background-insets: 0;
+    -fx-background-radius: 2px;
+    -fx-padding: 4px 8px;
+    -fx-font-size: 10pt;
 }
 
 .button {
@@ -41,7 +50,7 @@
 }
 
 .button:hover {
-    -fx-background-color: #4a90e2;
+    -fx-background-color: #3b4857;
 }
 
 .button:pressed {
@@ -55,7 +64,7 @@
 .text-field, .password-field, .text-area {
     -fx-background-color: #3c3f41;
     -fx-text-fill: #ffffff;
-    -fx-highlight-fill: #4a90e2;
+    -fx-highlight-fill: #3b4857;
     -fx-highlight-text-fill: #ffffff;
     -fx-prompt-text-fill: #aaaaaa;
 }
@@ -83,7 +92,7 @@
     -fx-text-fill: #ffffff;
 }
 .menu-item:focused {
-    -fx-background-color: #4a90e2;
+    -fx-background-color: #3b4857;
 }
 
 .combo-box, .combo-box-base {
@@ -92,25 +101,39 @@
     -fx-text-fill: #ffffff;
 }
 
-.scroll-bar:vertical  .decrement-button,
-.scroll-bar:vertical  .increment-button,
-.scroll-bar:horizontal.decrement-button,
-.scroll-bar:horizontal.increment-button {
-    -fx-background-color: #3b4857;
-    -fx-background-insets: 0;
-    -fx-padding: 2;
-    -fx-background-radius: 3;
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-padding: 0;
+    -fx-background-color: transparent;
+    -fx-shape: "";            /* remove the arrow glyph */
 }
 
-.scroll-bar .decrement-button:hover,
-.scroll-bar .increment-button:hover {
-    -fx-background-color: derive(#3b4857, 10%);
+.scroll-bar:vertical {
+    -fx-pref-width: 16px;     /* thickness of vertical bar */
+    -fx-padding: 0;           /* collapse any Modena padding */
+}
+.scroll-bar:horizontal {
+    -fx-pref-height: 16px;    /* thickness of horizontal bar */
+    -fx-padding: 0;
 }
 
-.scroll-bar .decrement-arrow,
-.scroll-bar .increment-arrow {
-    -fx-background-color: #ffffff;
+.scroll-bar .track {
+    -fx-background-color: #2b2b2b;   /* match your pane background */
     -fx-background-insets: 0;
+    -fx-background-radius: 2px;      /* rounded corners on track */
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: derive(#3c3f41, 20%); /* slightly lighter than inner bg */
+    -fx-background-insets: 1;       /* inset so thumb doesn’t fill entire track */
+    -fx-background-radius: 2px;      /* same radius so it lines up */
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: derive(#3c3f41, 30%);
+}
+.scroll-bar .thumb:pressed {
+    -fx-background-color: derive(#3c3f41, 10%);
 }
 
 .tab-pane {
@@ -121,5 +144,59 @@
     -fx-text-fill: #ffffff;
 }
 .tab:selected {
-    -fx-background-color: #4a90e2;
+    -fx-background-color: #3b4857;
+}
+
+.inner-split {
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-background-insets: 0;
+}
+
+.context-menu {
+    -fx-background-color: #3c3f41;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+
+    -fx-border-color: #1e1e1e;
+    -fx-border-width: 1px;
+    -fx-border-style: solid;
+
+    -fx-effect: dropshadow(
+    gaussian,
+    rgba(0,0,0,0.15),
+    5,     /* radius */
+    0.3,   /* spread */
+    4,     /* offsetX */
+    4      /* offsetY */
+    );
+}
+
+.context-menu .container {
+    -fx-padding: 0;
+    -fx-spacing: 0;
+}
+
+.context-menu .menu-item {
+    -fx-padding: 2px 8px;
+}
+
+.context-menu .menu-item .label {
+    -fx-padding: 2px 0;
+}
+
+.context-menu .separator-menu-item {
+    -fx-padding: 4px 0;
+    -fx-background-color: transparent;
+}
+
+.context-menu .separator:horizontal .line {
+    -fx-background-insets: 0;
+    -fx-background-color: #1e1e1e;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-pref-height: 1px;
+    -fx-min-height: 1px;
+    -fx-max-height: 1px;
+    -fx-padding: 0;
 }
