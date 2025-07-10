@@ -1,12 +1,29 @@
 package gg.grumble.client.config;
 
+import java.util.Collections;
+import java.util.List;
+
 public class ApplicationConfig {
-    private String username = "";
-    private int volume = 75;
+    private float volume = 0.5f;
+    private ServerConfig lastConnectedServer = null;
+    private List<ServerConfig> favoriteServerList = Collections.emptyList();
 
-    public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
+    public float getVolume() { return volume; }
+    public void setVolume(float volume) { this.volume = volume; }
 
-    public int getVolume() { return volume; }
-    public void setVolume(int volume) { this.volume = volume; }
+    public ServerConfig getLastConnectedServer() {
+        return lastConnectedServer;
+    }
+
+    public void setLastConnectedServer(ServerConfig lastConnectedServer) {
+        this.lastConnectedServer = lastConnectedServer;
+    }
+
+    public List<ServerConfig> getFavoriteServerList() {
+        return favoriteServerList;
+    }
+
+    public void setFavoriteServerList(List<ServerConfig> favoriteServerList) {
+        this.favoriteServerList = favoriteServerList;
+    }
 }

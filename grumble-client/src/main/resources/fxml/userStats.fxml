@@ -9,7 +9,7 @@
     <children>
         <GridPane hgap="4" styleClass="stats-pane" vgap="4" VBox.vgrow="ALWAYS">
             <columnConstraints>
-                <ColumnConstraints hgrow="ALWAYS" />
+                <ColumnConstraints hgrow="SOMETIMES" />
                 <ColumnConstraints hgrow="SOMETIMES" />
                 <ColumnConstraints hgrow="SOMETIMES" />
                 <ColumnConstraints hgrow="SOMETIMES" />
@@ -34,9 +34,9 @@
             </children>
             <rowConstraints>
                 <RowConstraints />
-                <RowConstraints />
-                <RowConstraints />
-                <RowConstraints />
+                <RowConstraints vgrow="SOMETIMES" />
+                <RowConstraints vgrow="SOMETIMES" />
+                <RowConstraints vgrow="SOMETIMES" />
             </rowConstraints>
         </GridPane>
         <GridPane hgap="4.0" styleClass="stats-pane" vgap="4.0" VBox.vgrow="ALWAYS">
@@ -78,9 +78,9 @@
             </children>
             <rowConstraints>
                 <RowConstraints />
-                <RowConstraints />
-                <RowConstraints />
-                <RowConstraints />
+                <RowConstraints vgrow="SOMETIMES" />
+                <RowConstraints vgrow="SOMETIMES" />
+                <RowConstraints vgrow="SOMETIMES" />
             </rowConstraints>
         </GridPane>
         <GridPane hgap="4" styleClass="stats-pane" vgap="4" VBox.vgrow="ALWAYS">
@@ -101,8 +101,8 @@
             </children>
             <rowConstraints>
                 <RowConstraints />
-                <RowConstraints />
-                <RowConstraints />
+                <RowConstraints vgrow="SOMETIMES" />
+                <RowConstraints vgrow="SOMETIMES" />
             </rowConstraints>
         </GridPane>
     </children>

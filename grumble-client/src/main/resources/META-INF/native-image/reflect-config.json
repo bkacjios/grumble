@@ -6,6 +6,12 @@
     "allDeclaredFields": true
   },
   {
+    "name": "gg.grumble.client.config.FavoriteServer",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true
+  },
+  {
     "name": "com.sun.media.sound.DirectAudioDeviceProvider",
     "allDeclaredConstructors": true,
     "allPublicMethods": true

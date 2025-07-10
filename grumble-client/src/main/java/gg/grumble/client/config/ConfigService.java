@@ -5,18 +5,16 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static gg.grumble.client.utils.FileUtils.getAppConfigPath;
 
 @Component
 public class ConfigService {
-
     private final Path configPath;
     private final ObjectMapper mapper = new ObjectMapper();
-
     private ApplicationConfig config;
 
     public ConfigService(@Value("${app.name}") String appName) {
@@ -24,8 +22,13 @@ public class ConfigService {
     }
 
     @PostConstruct
-    public void init() throws IOException {
-        loadConfig();
+    private void init() throws IOException {
+        try {
+            config = mapper.readValue(configPath.toFile(), ApplicationConfig.class);
+        } catch (IOException e) {
+            config = new ApplicationConfig();
+            saveConfig();
+        }
     }
 
     public ApplicationConfig getConfig() {
@@ -33,19 +36,8 @@ public class ConfigService {
     }
 
     public void saveConfig() throws IOException {
-        File dir = configPath.getParent().toFile();
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw new IOException("Failed to create config directory: " + dir);
-        }
-        mapper.writerWithDefaultPrettyPrinter().writeValue(configPath.toFile(), config);
-    }
-
-    private void loadConfig() throws IOException {
-        try {
-            config = mapper.readValue(configPath.toFile(), ApplicationConfig.class);
-        } catch (IOException e) {
-            config = new ApplicationConfig();
-            saveConfig();
-        }
+        Files.createDirectories(configPath.getParent());
+        mapper.writerWithDefaultPrettyPrinter()
+                .writeValue(configPath.toFile(), config);
     }
 }

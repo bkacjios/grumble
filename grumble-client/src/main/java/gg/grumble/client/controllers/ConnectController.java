@@ -1,5 +1,7 @@
 package gg.grumble.client.controllers;
 
+import gg.grumble.client.config.ConfigService;
+import gg.grumble.client.config.ServerConfig;
 import gg.grumble.client.models.MumbleServer;
 import gg.grumble.client.services.MumbleServerListService;
 import javafx.application.Platform;
@@ -46,9 +48,11 @@ public class ConnectController implements Initializable {
     private final TreeItem<ServerEntry> internet = new TreeItem<>(new ServerEntry("Public Internet"));
 
     private final MumbleServerListService serverListService;
+    private final ConfigService configService;
 
-    public ConnectController(MumbleServerListService serverListService) {
+    public ConnectController(MumbleServerListService serverListService, ConfigService configService) {
         this.serverListService = serverListService;
+        this.configService = configService;
     }
 
     private <T> Callback<TreeTableColumn<ServerEntry, T>, TreeTableCell<ServerEntry, T>> createBlankCellFactory() {
@@ -156,6 +160,7 @@ public class ConnectController implements Initializable {
             return true;
         });
 
+        loadFavoritesList();
         loadServerList();
     }
 
@@ -175,6 +180,14 @@ public class ConnectController implements Initializable {
         };
         if (!asc) itemComparator = itemComparator.reversed();
         return itemComparator;
+    }
+
+    private void loadFavoritesList() {
+        favorites.getChildren().setAll(configService.getConfig().getFavoriteServerList()
+                .stream()
+                .map(ServerEntry::new)
+                .map(TreeItem::new)
+                .toList());
     }
 
     private void loadServerList() {
@@ -216,6 +229,7 @@ public class ConnectController implements Initializable {
         private final StringProperty url = new SimpleStringProperty();
         private final IntegerProperty ping = new SimpleIntegerProperty();
         private final IntegerProperty users = new SimpleIntegerProperty();
+        private final StringProperty username = new SimpleStringProperty();
 
         /**
          * Populate from the XML‐fetched MumbleServer
@@ -230,6 +244,13 @@ public class ConnectController implements Initializable {
             this.port.set(server.getPort());
             this.region.set(server.getRegion());
             this.url.set(server.getUrl());
+        }
+
+        public ServerEntry(ServerConfig serverConfig) {
+            this.name.set(serverConfig.getLabel());
+            this.ip.set(serverConfig.getAddress());
+            this.port.set(serverConfig.getPort());
+            this.username.set(serverConfig.getUsername());
         }
 
         public ServerEntry(String name) {
@@ -286,6 +307,22 @@ public class ConnectController implements Initializable {
 
         public void setUsers(int value) {
             this.users.set(value);
+        }
+
+        public String getUsername() {
+            return username.get();
+        }
+
+        public void setUsername(String username) {
+            this.username.set(username);
+        }
+
+        public StringProperty usernameProperty() {
+            return username;
+        }
+
+        public boolean hasUsername() {
+            return !username.get().isBlank();
         }
     }
 }

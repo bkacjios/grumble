@@ -27,7 +27,9 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import javafx.util.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +40,7 @@ import java.util.*;
 import java.util.stream.Stream;
 
 @Component
-public class GrumbleController implements Initializable, StageAware {
+public class GrumbleController implements Initializable {
     private static final Logger LOG = LoggerFactory.getLogger(GrumbleController.class);
 
     private static final int ICON_SIZE = 20;
@@ -66,8 +68,6 @@ public class GrumbleController implements Initializable, StageAware {
     private Image userServerMuteIcon;
     private Image userServerDeafIcon;
     private Image userAuthenticatedIcon;
-
-    private Stage stage;
 
     public GrumbleController(FxmlLoaderService fxmlLoaderService) {
         this.fxmlLoaderService = fxmlLoaderService;
@@ -114,11 +114,6 @@ public class GrumbleController implements Initializable, StageAware {
                 Objects.requireNonNull(getClass().getResource("/icons/authenticated.png")).toExternalForm(),
                 ICON_SIZE, ICON_SIZE, true, true
         );
-    }
-
-    @Override
-    public void setStage(Stage stage) {
-        this.stage = stage;
     }
 
     @Override
@@ -220,24 +215,6 @@ public class GrumbleController implements Initializable, StageAware {
             private final ImageView userServerMute = new ImageView(userServerMuteIcon);
             private final ImageView userServerDeaf = new ImageView(userServerDeafIcon);
             private final ImageView userAuthenticated = new ImageView(userAuthenticatedIcon);
-
-            private final ContextMenu channelMenu = new ContextMenu(
-                    new MenuItem("Add…"),
-                    new MenuItem("Edit.."),
-                    new MenuItem("Remove.."),
-                    new SeparatorMenuItem(),
-                    new MenuItem("Link"),
-                    new MenuItem("Unlink"),
-                    new MenuItem("Unlink All"),
-                    new SeparatorMenuItem(),
-                    new MenuItem("Copy URL"),
-                    new MenuItem("Send Message..")
-            );
-            private final ContextMenu userMenu = new ContextMenu(
-                    new MenuItem("Private Message"),
-                    new MenuItem("Kick from Channel")
-            );
-
             {
                 Stream.of(channelView, user, userSpeaking, userSpeakingMuted, userSelfMute, userSelfDeaf,
                         userServerDeaf,userServerMute, userAuthenticated).forEach(view -> {
@@ -424,8 +401,12 @@ public class GrumbleController implements Initializable, StageAware {
             Stage stage = stageController.getKey();
             UserStatsController controller = stageController.getValue();
             controller.setClientSession(this.client, userFx.getUser());
+            stage.initStyle(StageStyle.UTILITY);
             stage.show();
+            stage.sizeToScene();
             stage.centerOnScreen();
+            stage.setMinWidth(stage.getWidth());
+            stage.setMinHeight(stage.getHeight());
         });
 
         MenuItem addFriendItem = new MenuItem("Add Friend");
@@ -674,6 +655,8 @@ public class GrumbleController implements Initializable, StageAware {
         Pair<Stage, ConnectController> stageController = fxmlLoaderService.createWindow("/fxml/connect.fxml");
         Stage stage = stageController.getKey();
         stage.setTitle("Connect");
+        stage.initModality(Modality.APPLICATION_MODAL);
+        stage.initStyle(StageStyle.UTILITY);
         stage.show();
         stage.centerOnScreen();
     }
