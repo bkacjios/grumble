@@ -37,7 +37,7 @@ public class AudioEngine {
     public synchronized void start() {
         if (running) return;
         running = true;
-        audioThread = new Thread(this::runLoop, "AudioEngine-Thread");
+        audioThread = new Thread(this::runLoop, "audio");
         audioThread.setDaemon(true);
         audioThread.start();
     }

@@ -30,7 +30,7 @@ public class UserStatsController implements StageAware, Closeable {
 
     private static final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "MumbleUserStatsTicker");
+                Thread t = new Thread(r, "stats");
                 t.setDaemon(true);
                 return t;
             });

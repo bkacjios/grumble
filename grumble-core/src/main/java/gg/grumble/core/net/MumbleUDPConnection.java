@@ -48,9 +48,7 @@ public class MumbleUDPConnection implements Closeable {
             throw new RuntimeException("Unable to initialize UDP connection", e);
         }
 
-        this.executor = Executors.newSingleThreadExecutor(r -> {
-            return new Thread(r, "MumbleUDPConnection-Thread");
-        });
+        this.executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "udp"));
     }
 
     public void connect() {

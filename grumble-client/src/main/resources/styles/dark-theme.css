@@ -200,3 +200,8 @@
     -fx-max-height: 1px;
     -fx-padding: 0;
 }
+
+.dialog-pane > .button-bar > .container > .details-button.more,
+.dialog-pane > .button-bar > .container > .details-button.less {
+    -fx-text-fill: white;
+}

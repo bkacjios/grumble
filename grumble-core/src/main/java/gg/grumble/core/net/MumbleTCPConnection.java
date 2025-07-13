@@ -42,9 +42,7 @@ public class MumbleTCPConnection implements Closeable {
         this.onConnected = onConnected;
         this.onFrameReceived = onFrameReceived;
         this.onDisconnected = onDisconnected;
-        this.executor = Executors.newSingleThreadExecutor(r -> {
-            return new Thread(r, "MumbleTCPConnection-Thread");
-        });
+        this.executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "tcp"));
     }
 
     public void connect() {
