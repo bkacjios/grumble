@@ -4,6 +4,7 @@ import gg.grumble.client.config.ConfigService;
 import gg.grumble.client.config.ServerConfig;
 import gg.grumble.client.models.MumbleServer;
 import gg.grumble.client.services.MumbleServerListService;
+import gg.grumble.client.utils.WindowIcon;
 import javafx.application.Platform;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -30,6 +31,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Component
+@WindowIcon("/icons/connect.png")
 public class ConnectController implements Initializable {
 
     private static final int ICON_SIZE = 20;

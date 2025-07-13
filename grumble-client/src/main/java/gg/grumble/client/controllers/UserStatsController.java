@@ -2,6 +2,7 @@ package gg.grumble.client.controllers;
 
 import gg.grumble.client.utils.Closeable;
 import gg.grumble.client.utils.StageAware;
+import gg.grumble.client.utils.WindowIcon;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEventListener;
 import gg.grumble.core.client.MumbleEvents;
@@ -22,6 +23,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 @Component
+@WindowIcon("/icons/info.png")
 @Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 public class UserStatsController implements StageAware, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(UserStatsController.class);

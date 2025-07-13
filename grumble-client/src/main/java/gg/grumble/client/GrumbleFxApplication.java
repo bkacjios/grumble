@@ -1,23 +1,22 @@
 package gg.grumble.client;
 
+import gg.grumble.client.services.FxmlLoaderService;
 import javafx.application.Application;
 import javafx.application.Platform;
-import javafx.fxml.FXMLLoader;
-import javafx.scene.Scene;
 import javafx.stage.Stage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.context.ConfigurableApplicationContext;
 
-import java.util.Objects;
-
 public class GrumbleFxApplication extends Application {
     private static final Logger LOG = LogManager.getLogger(GrumbleFxApplication.class);
 
     private static ConfigurableApplicationContext context;
+    private static FxmlLoaderService fxmlLoaderService;
 
     public static void setApplicationContext(ConfigurableApplicationContext applicationContext) {
         context = applicationContext;
+        fxmlLoaderService = context.getBean(FxmlLoaderService.class);
     }
 
     @Override
@@ -28,17 +27,8 @@ public class GrumbleFxApplication extends Application {
     @Override
     public void start(Stage stage) {
         try {
-            // Load your FXML and controller from Spring context
-            FXMLLoader fxmlLoader = new FXMLLoader(getClass().getResource("/fxml/main.fxml"));
-
-            // Use Spring to resolve controller beans
-            fxmlLoader.setControllerFactory(context::getBean);
-
-            Scene scene = new Scene(fxmlLoader.load());
-            scene.getStylesheets().add(Objects.requireNonNull(getClass().getResource("/styles/dark-theme.css"))
-                    .toExternalForm());
+            fxmlLoaderService.createWindow(stage, "/fxml/main.fxml");
             stage.setTitle("Grumble");
-            stage.setScene(scene);
             stage.show();
             stage.centerOnScreen();
         } catch (Exception e) {

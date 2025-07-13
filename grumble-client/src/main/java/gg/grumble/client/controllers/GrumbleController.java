@@ -1,9 +1,9 @@
 package gg.grumble.client.controllers;
 
-import gg.grumble.client.audio.OpenALOutput;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
-import gg.grumble.client.utils.StageAware;
+import gg.grumble.client.utils.WindowIcon;
+import gg.grumble.core.audio.SourceDataLineOutput;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleChannel;
@@ -35,11 +35,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import javax.sound.sampled.LineUnavailableException;
 import java.net.URL;
 import java.util.*;
 import java.util.stream.Stream;
 
 @Component
+@WindowIcon("/icons/talking_off.png")
 public class GrumbleController implements Initializable {
     private static final Logger LOG = LoggerFactory.getLogger(GrumbleController.class);
 
@@ -52,7 +54,7 @@ public class GrumbleController implements Initializable {
 
     private final FxmlLoaderService fxmlLoaderService;
 
-    private final MumbleClient client;
+    private final MumbleClient client = new MumbleClient();
 
     private final Map<MumbleChannel, TreeItem<Object>> channelNodeMap = new HashMap<>();
     private final Map<MumbleUser, MumbleUserFx> userFxMap = new HashMap<>();
@@ -69,12 +71,11 @@ public class GrumbleController implements Initializable {
     private Image userServerDeafIcon;
     private Image userAuthenticatedIcon;
 
-    public GrumbleController(FxmlLoaderService fxmlLoaderService) {
+    public GrumbleController(FxmlLoaderService fxmlLoaderService) throws LineUnavailableException {
         this.fxmlLoaderService = fxmlLoaderService;
 
-        client = new MumbleClient();
-        client.setAudioOutput(new OpenALOutput());
-        client.setVolume(0.1f);
+        client.setAudioOutput(new SourceDataLineOutput());
+        client.setVolume(1.0f);
     }
 
     private void loadIcons() {

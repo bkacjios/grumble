@@ -2,6 +2,7 @@ package gg.grumble.client.services;
 
 import gg.grumble.client.models.MumbleServerList;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -13,9 +14,9 @@ public class MumbleServerListService {
     private final WebClient client;
     private final XmlMapper xmlMapper = new XmlMapper();
 
-    public MumbleServerListService(WebClient.Builder builder) {
+    public MumbleServerListService(@Value("${mumble.server.url}") String url, WebClient.Builder builder) {
         this.client = builder
-                .baseUrl("https://publist.mumble.info")
+                .baseUrl(url)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.TEXT_XML_VALUE)
                 .build();
     }
