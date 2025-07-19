@@ -1,6 +1,6 @@
 package gg.grumble.client.audio;
 
-import gg.grumble.core.audio.AudioOutput;
+import gg.grumble.core.audio.output.AudioOutputDevice;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.openal.AL;
 import org.lwjgl.openal.AL10;
@@ -14,7 +14,9 @@ import java.nio.IntBuffer;
 import static gg.grumble.core.enums.MumbleAudioConfig.SAMPLE_RATE;
 import static gg.grumble.core.enums.MumbleAudioConfig.SAMPLES_PER_FRAME_TOTAL;
 
-public class OpenALOutput implements AudioOutput {
+public class OpenALOutputDevice implements AudioOutputDevice {
+    private static final int MAX_BUFFERS = 4;
+
     private long device;
     private long context;
     private int source;
@@ -32,18 +34,18 @@ public class OpenALOutput implements AudioOutput {
         context = ALC10.alcCreateContext(device, (IntBuffer) null);
         ALC10.alcMakeContextCurrent(context);
 
-        // 2) Initialize capabilities properly and store them for rebinding
+        // Initialize capabilities properly and store them for rebinding
         ALCCapabilities alcCaps = ALC.createCapabilities(device);
         AL.createCapabilities(alcCaps);
 
-        // 3) Generate source and N buffers
+        // Generate source and N buffers
         source = AL10.alGenSources();
-        buffers = new int[4];
+        buffers = new int[MAX_BUFFERS];
         for (int i = 0; i < buffers.length; i++) {
             buffers[i] = AL10.alGenBuffers();
         }
 
-        // 4) Prefill buffers with silence to enqueue initial queue
+        // Prefill buffers with silence to initialize
         int bytesPerFrame = SAMPLES_PER_FRAME_TOTAL * 2; // 16-bit samples
         ByteBuffer silence = BufferUtils.createByteBuffer(bytesPerFrame);
         for (int bufId : buffers) {
@@ -51,7 +53,7 @@ public class OpenALOutput implements AudioOutput {
             AL10.alSourceQueueBuffers(source, bufId);
         }
 
-        // 5) Start playback
+        // Start playback
         AL10.alSourcePlay(source);
     }
 
@@ -67,7 +69,7 @@ public class OpenALOutput implements AudioOutput {
         dataBuffer.put(pcm, offset, length);
         dataBuffer.flip();
 
-        // Unqueue any processed buffers
+        // Dequeue any processed buffers
         int processed = AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED);
         if (processed > 0) {
             IntBuffer unq = BufferUtils.createIntBuffer(processed);

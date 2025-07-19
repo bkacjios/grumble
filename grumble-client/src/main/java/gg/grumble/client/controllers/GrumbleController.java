@@ -1,9 +1,11 @@
 package gg.grumble.client.controllers;
 
+import gg.grumble.client.audio.OpenALOutputDevice;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.client.utils.WindowIcon;
-import gg.grumble.core.audio.SourceDataLineOutput;
+import gg.grumble.core.audio.input.TargetDataLineInputDevice;
+import gg.grumble.core.audio.output.SourceDataLineOutputDevice;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleChannel;
@@ -74,8 +76,9 @@ public class GrumbleController implements Initializable {
     public GrumbleController(FxmlLoaderService fxmlLoaderService) throws LineUnavailableException {
         this.fxmlLoaderService = fxmlLoaderService;
 
-        client.setAudioOutput(new SourceDataLineOutput());
-        client.setVolume(1.0f);
+        client.setAudioOutput(new SourceDataLineOutputDevice());
+        client.setAudioInput(new TargetDataLineInputDevice());
+        client.setVolume(0.1f);
     }
 
     private void loadIcons() {

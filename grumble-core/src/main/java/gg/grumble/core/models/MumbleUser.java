@@ -28,8 +28,8 @@ public class MumbleUser {
     private boolean localMute;
     private boolean prioritySpeaker;
     private boolean recording;
-    private boolean speaking;
-    private boolean transmitting;
+    private volatile boolean speaking;
+    private volatile boolean transmitting;
 
     private String comment;
     private String hash;
@@ -184,6 +184,10 @@ public class MumbleUser {
     }
 
     public void pushPcmAudio(float[] decodedPcm, int sampleCount, boolean transmitting) {
+        if (transmitting && !this.transmitting) {
+            pcmBuffer.clear();
+            pcmBuffer.resetJitter();
+        }
         this.transmitting = transmitting;
         pcmBuffer.write(decodedPcm, 0, sampleCount);
     }

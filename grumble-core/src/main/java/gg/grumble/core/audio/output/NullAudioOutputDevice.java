@@ -1,9 +1,7 @@
-package gg.grumble.core.audio;
+package gg.grumble.core.audio.output;
 
-public class NullAudioOutput implements AudioOutput {
-    private float volume = 0.5f;
-
-    public NullAudioOutput() {
+public class NullAudioOutputDevice implements AudioOutputDevice {
+    public NullAudioOutputDevice() {
     }
 
     @Override
@@ -20,11 +18,10 @@ public class NullAudioOutput implements AudioOutput {
 
     @Override
     public void setVolume(float volume) {
-        this.volume = volume;
     }
 
     public float getVolume() {
-        return volume;
+        return 0;
     }
 
     @Override

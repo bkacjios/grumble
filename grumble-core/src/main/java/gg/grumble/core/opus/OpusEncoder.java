@@ -8,12 +8,10 @@ import java.nio.ShortBuffer;
 import java.util.Objects;
 
 public class OpusEncoder {
-
     private final PointerByReference encoder;
 
     public OpusEncoder(int sampleRate, int channels, int application) {
         encoder = new PointerByReference();
-        int size = Opus.INSTANCE.opus_encoder_get_size(channels);
         var errorBuf = java.nio.IntBuffer.allocate(1);
         var enc = Opus.INSTANCE.opus_encoder_create(sampleRate, channels, application, errorBuf);
         if (errorBuf.get(0) != Opus.OPUS_OK) {

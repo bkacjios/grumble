@@ -2,9 +2,12 @@ package gg.grumble.core.client;
 
 import club.minnced.opus.util.OpusLibrary;
 import com.google.protobuf.*;
-import gg.grumble.core.audio.AudioEngine;
+import de.maxhenkel.rnnoise4j.Denoiser;
+import de.maxhenkel.rnnoise4j.UnknownPlatformException;
+import gg.grumble.core.audio.AudioInput;
 import gg.grumble.core.audio.AudioOutput;
-import gg.grumble.core.audio.NullAudioOutput;
+import gg.grumble.core.audio.input.TargetDataLineInputDevice;
+import gg.grumble.core.audio.output.AudioOutputDevice;
 import gg.grumble.core.crypto.MumbleOCB2;
 import gg.grumble.core.enums.MumbleClientType;
 import gg.grumble.core.enums.MumbleMessageType;
@@ -15,6 +18,7 @@ import gg.grumble.core.models.MumbleUser;
 import gg.grumble.core.net.MumbleTCPConnection;
 import gg.grumble.core.net.MumbleUDPConnection;
 import gg.grumble.core.opus.OpusDecoder;
+import gg.grumble.core.opus.OpusEncoder;
 import gg.grumble.core.utils.MumbleVarInt;
 import gg.grumble.mumble.MumbleProto;
 import gg.grumble.mumble.MumbleUDPProto;
@@ -30,6 +34,9 @@ import java.util.concurrent.*;
 import java.util.function.Predicate;
 
 import static gg.grumble.core.enums.MumbleAudioConfig.*;
+import static gg.grumble.core.utils.AudioUtils.bytesToShorts;
+import static gg.grumble.core.utils.AudioUtils.shortsToBytes;
+import static tomp2p.opuswrapper.Opus.OPUS_APPLICATION_VOIP;
 
 public class MumbleClient implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(MumbleClient.class);
@@ -54,11 +61,15 @@ public class MumbleClient implements Closeable {
     private final MumbleOCB2 crypto = new MumbleOCB2();
 
     /* Audio */
-    private final AudioEngine audioEngine = new AudioEngine(this::mixAndPlayAudio, new NullAudioOutput());
+    private final Denoiser denoiser;
+    private final AudioInput audioInput = new AudioInput(this::encodeAndSendAudio);
+    private final AudioOutput audioOutput = new AudioOutput(this::mixAndPlayAudio);
+    private final OpusEncoder opusEncoder;
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
 
     /* Scheduler */
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService decodeExecutor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService pingScheduler = Executors.newSingleThreadScheduledExecutor();
     private final List<ScheduledFuture<?>> scheduledPings = new ArrayList<>();
 
@@ -79,6 +90,9 @@ public class MumbleClient implements Closeable {
 
     private boolean synced = false;
 
+    private byte audioTarget = 0;
+    private long audioSequence = 0;
+
     private boolean legacyConnection = false;
     private boolean tcpUdpTunnel = true;
     private int udpPingAccumulator = 0;
@@ -94,8 +108,12 @@ public class MumbleClient implements Closeable {
     public MumbleClient() {
         try {
             OpusLibrary.loadFromJar();
+            this.denoiser = new Denoiser();
+            this.opusEncoder = new OpusEncoder(SAMPLE_RATE, 1, OPUS_APPLICATION_VOIP);
         } catch (IOException e) {
             throw new RuntimeException("Failed to load opus library", e);
+        } catch (UnknownPlatformException e) {
+            throw new RuntimeException("Unknown denoise platform", e);
         }
     }
 
@@ -236,6 +254,12 @@ public class MumbleClient implements Closeable {
         fireEvent(new MumbleEvents.ServerPongUdpLegacy(updateUdpPing(timestamp, udp)));
     }
 
+    /**
+     * Update UDP ping statistics for the given timestamp.
+     * @param timestamp The time this ping packet was sent.
+     * @param udp If this message came from our UDP connection.
+     * @return Ping time in milliseconds.
+     */
     private float updateUdpPing(long timestamp, boolean udp) {
         long now = System.nanoTime();
 
@@ -273,7 +297,8 @@ public class MumbleClient implements Closeable {
 
         // Schedule TCP & UDP pings to keep connection alive
         schedulePing(this::pingTcp);
-        audioEngine.start();
+        audioInput.start();
+        audioOutput.start();
 
         fireEvent(new MumbleEvents.ServerSync(this.self, sync));
     }
@@ -285,6 +310,82 @@ public class MumbleClient implements Closeable {
     private void unschedulePings() {
         scheduledPings.forEach(future -> future.cancel(false));
         scheduledPings.clear();
+    }
+
+    private void encodeAndSendAudio(byte[] bytes) {
+        short[] pcm = bytesToShorts(bytes);
+        int frameSize = pcm.length;
+
+        pcm = denoiser.denoise(pcm);
+
+        byte[] encoded = new byte[UDP_BUFFER_MAX];
+        int encodedLen = opusEncoder.encode(pcm, frameSize, encoded);
+
+        if (this.legacyConnection) {
+            sendLegacyAudioPacket(encoded, encodedLen, false);
+        } else {
+            sendProtobufAudioPacket(encoded, false);
+        }
+    }
+
+    private void sendProtobufAudioPacket(byte[] encoded, boolean lastFrame) {
+        MumbleUDPProto.Audio.Builder audio = MumbleUDPProto.Audio.newBuilder();
+        audio.setFrameNumber(audioSequence++);
+        audio.setIsTerminator(lastFrame);
+        audio.setTarget(this.audioTarget);
+        audio.setOpusData(ByteString.copyFrom(encoded));
+        if (this.tcpUdpTunnel) {
+            send(MumbleMessageType.UDP_TUNNEL, audio.build());
+        } else {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Sending UDP Protobuf Audio");
+            }
+            try {
+                udpConnection.send(crypto.encrypt(audio.build().toByteArray()));
+            } catch (Exception e) {
+                LOG.error("Unable to encrypt or send UDP packet", e);
+            }
+        }
+    }
+
+    /**
+     * Construct a legacy audio packet and send it.
+     * Structure:
+     *  1 Byte message header
+     *      - Bits 0-4 Target ID (Max type value of 7)
+     *      - Bits 5-7 Legacy Packet type (Max target value of 31)
+     *  VarInt Audio sequence number
+     *  VarInt Audio header (Length is masked with 0x1FFF, 13th bit for terminator flag)
+     *  Encoded audio data
+     * @param encoded Encoded audio data
+     * @param encodedLen Length of encoded audio data
+     * @param lastFrame If this is the final frame of audio
+     */
+    private void sendLegacyAudioPacket(byte[] encoded, int encodedLen, boolean lastFrame) {
+
+        int header = encodedLen & 0x1FFF;
+        if (lastFrame) {
+            header |= (1 << 13);
+        }
+
+        ByteBuffer packet = ByteBuffer.allocate(UDP_BUFFER_MAX);
+        packet.put((byte) (((MumblePacketTypeLegacy.OPUS & 0x7) << 5) | (audioTarget & 0x1F)));
+        MumbleVarInt.writeVarInt(packet, audioSequence++);
+        MumbleVarInt.writeVarInt(packet, header);
+        packet.put(encoded, 0, encodedLen);
+        packet.flip();
+        if (this.tcpUdpTunnel) {
+            send(packet);
+        } else {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Sending UDP Legacy Audio");
+            }
+            try {
+                udpConnection.send(crypto.encrypt(packet));
+            } catch (Exception e) {
+                LOG.error("Unable to encrypt or send UDP packet", e);
+            }
+        }
     }
 
     /**
@@ -350,22 +451,26 @@ public class MumbleClient implements Closeable {
                 float x = softLimit(mix[i]);
                 out[i] = (short) (Math.max(-1f, Math.min(1f, x)) * 32767f);
             }
-            audioEngine.write(shortsToBytes(out), 0, out.length * 2);
+            audioOutput.write(shortsToBytes(out), 0, out.length * 2);
         } catch (Exception e) {
             LOG.error("Exception in playback thread", e);
         }
     }
 
-    public void setAudioOutput(AudioOutput device) {
-        audioEngine.switchDevice(device);
+    public void setAudioInput(TargetDataLineInputDevice device) {
+        audioInput.switchInputDevice(device);
+    }
+
+    public void setAudioOutput(AudioOutputDevice device) {
+        audioOutput.switchOutputDevice(device);
     }
 
     public float getVolume() {
-        return audioEngine.getVolume();
+        return audioOutput.getVolume();
     }
 
     public void setVolume(float volume) {
-        audioEngine.setVolume(volume);
+        audioOutput.setVolume(volume);
     }
 
     private float computeAutoGain(float[] pcm, int samples) {
@@ -393,17 +498,6 @@ public class MumbleClient implements Closeable {
 
     private final ByteBuffer audioByteBuffer = ByteBuffer.allocateDirect(SAMPLES_PER_FRAME_TOTAL * 2)
             .order(ByteOrder.LITTLE_ENDIAN);
-
-    public byte[] shortsToBytes(short[] input) {
-        audioByteBuffer.clear();
-        for (short s : input) {
-            audioByteBuffer.putShort(s);
-        }
-        byte[] result = new byte[audioByteBuffer.position()];
-        audioByteBuffer.flip();
-        audioByteBuffer.get(result);
-        return result;
-    }
 
     /**
      * A channel is being removed, so remove it from childrenByParent's list of children
@@ -754,7 +848,7 @@ public class MumbleClient implements Closeable {
             byte[] payload = new byte[payloadLen];
             data.get(payload);
 
-            decodeOpusAndQueue(session, payload, transmitting);
+            decodeExecutor.execute(() -> decodeOpusAndQueue(session, payload, transmitting));
         }
     }
 
@@ -956,6 +1050,21 @@ public class MumbleClient implements Closeable {
         return sb.toString().trim();
     }
 
+    /**
+     * Send a TCP UDP_TUNNEL packet using a raw ByteBuffer.
+     * Only used for connections to legacy servers.
+     * @param message The UDP message we want to tunnel
+     */
+    private synchronized void send(ByteBuffer message) {
+        ByteBuffer framed = frameMessage(MumbleMessageType.UDP_TUNNEL, message.array());
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Sending Legacy TCP {}: {}", MumbleMessageType.UDP_TUNNEL.name(), toHex(framed));
+        }
+
+        tcpConnection.send(framed);
+    }
+
     public synchronized void send(MumbleMessageType type, MessageLite message) {
         byte[] protobufBytes = message.toByteArray();
         ByteBuffer framed = frameMessage(type, protobufBytes);
@@ -1124,7 +1233,8 @@ public class MumbleClient implements Closeable {
     @Override
     public void close() {
         unschedulePings();
-        audioEngine.stop();
+        audioInput.stop();
+        audioOutput.stop();
         opusDecoders.clear();
         if (tcpConnection != null) tcpConnection.close();
         if (udpConnection != null) udpConnection.close();

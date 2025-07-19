@@ -1,34 +1,40 @@
 package gg.grumble.core.audio;
 
+import gg.grumble.core.audio.input.AudioInputDevice;
+import gg.grumble.core.audio.input.NullAudioInputDevice;
+
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Consumer;
 
 import static gg.grumble.core.enums.MumbleAudioConfig.PLAYBACK_DURATION_MS;
 
-/**
- * Drives audio mixing and playback at a fixed interval on its own thread.
- * Accepts a Runnable that performs mixing and writes to audioOutput.
- * Allows hot-swapping the AudioOutput on the audio thread without restarting the thread.
- */
-public class AudioEngine {
+public class AudioInput {
     private Thread audioThread;
     private volatile boolean running;
-    private final long intervalNanos;
+    private long intervalNanos;
 
-    private final Runnable task;
-    private AudioOutput audioOutput;
-    private volatile AudioOutput pendingDevice;
+    private final Consumer<byte[]> task;
+    private AudioInputDevice audioDevice;
+    private volatile AudioInputDevice pendingDevice;
 
     private float volume = 0.5f;
 
     /**
-     * @param task a Runnable that mixes audio and writes to audioOutput
-     * @param initialDevice the AudioOutput to use when engine starts
+     * @param onAudioOut a Consumer that will accept the output PCM data
      */
-    public AudioEngine(Runnable task, AudioOutput initialDevice) {
-        this.task = task;
-        this.audioOutput = initialDevice;
+    public AudioInput(Consumer<byte[]> onAudioOut) {
+        this.task = onAudioOut;
+        this.audioDevice = new NullAudioInputDevice();
         this.intervalNanos = TimeUnit.MILLISECONDS.toNanos(PLAYBACK_DURATION_MS);
+    }
+
+    public void setFrameDurationMillis(int millis) {
+        this.intervalNanos = TimeUnit.MILLISECONDS.toNanos(millis);
+    }
+
+    public int getFrameDurationMillis() {
+        return (int) TimeUnit.NANOSECONDS.toMillis(intervalNanos);
     }
 
     /**
@@ -37,21 +43,23 @@ public class AudioEngine {
     public synchronized void start() {
         if (running) return;
         running = true;
-        audioThread = new Thread(this::runLoop, "audio");
+        audioThread = new Thread(this::runLoop, "input");
         audioThread.setDaemon(true);
+        audioThread.setPriority(Thread.MAX_PRIORITY);
         audioThread.start();
     }
 
     public void setVolume(float volume) {
         this.volume = volume;
+        if (pendingDevice != null) {
+            pendingDevice.setVolume(volume);
+        } else if (audioDevice != null) {
+            audioDevice.setVolume(volume);
+        }
     }
 
     public float getVolume() {
         return volume;
-    }
-
-    public void write(byte[] pcm, int offset, int length) {
-        audioOutput.write(pcm, offset, length);
     }
 
     /**
@@ -59,9 +67,9 @@ public class AudioEngine {
      * If engine is running, swap happens on the audio thread at interval boundary.
      * If not running yet, simply replaces the device.
      */
-    public synchronized void switchDevice(AudioOutput newDevice) {
+    public synchronized void switchInputDevice(AudioInputDevice newDevice) {
         if (!running) {
-            this.audioOutput = newDevice;
+            this.audioDevice = newDevice;
         } else {
             this.pendingDevice = newDevice;
         }
@@ -72,8 +80,8 @@ public class AudioEngine {
      */
     private void runLoop() {
         // Initialize playback on this thread
-        audioOutput.start();
-        audioOutput.setVolume(volume);
+        audioDevice.setVolume(volume);
+        audioDevice.start();
         long nextTime = System.nanoTime();
 
         while (running && !Thread.currentThread().isInterrupted()) {
@@ -85,16 +93,16 @@ public class AudioEngine {
 
             // Handle pending device swap if requested
             if (pendingDevice != null) {
-                audioOutput.stop();
-                audioOutput.close();
-                audioOutput = pendingDevice;
+                audioDevice.stop();
+                audioDevice.close();
+                audioDevice = pendingDevice;
                 pendingDevice = null;
-                audioOutput.start();
-                audioOutput.setVolume(volume);
+                audioDevice.setVolume(volume);
+                audioDevice.start();
             }
 
-            // perform mixing and playback
-            task.run();
+            // read microphone for the given interval and accept it
+            task.accept(audioDevice.read(getFrameDurationMillis()));
 
             nextTime += intervalNanos;
             // catch up if we're more than one interval behind
@@ -104,8 +112,8 @@ public class AudioEngine {
         }
 
         // cleanup device at shutdown
-        audioOutput.stop();
-        audioOutput.close();
+        audioDevice.stop();
+        audioDevice.close();
     }
 
     /**
@@ -119,7 +127,7 @@ public class AudioEngine {
             audioThread.join();
         } catch (InterruptedException ignored) {
         }
-        audioOutput.stop();
-        audioOutput.close();
+        audioDevice.stop();
+        audioDevice.close();
     }
 }

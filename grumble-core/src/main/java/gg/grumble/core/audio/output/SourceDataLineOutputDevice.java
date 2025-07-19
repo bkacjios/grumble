@@ -1,4 +1,4 @@
-package gg.grumble.core.audio;
+package gg.grumble.core.audio.output;
 
 import javax.sound.sampled.*;
 
@@ -6,10 +6,10 @@ import static gg.grumble.core.enums.MumbleAudioConfig.CHANNELS;
 import static gg.grumble.core.enums.MumbleAudioConfig.SAMPLE_RATE;
 
 @SuppressWarnings("unused")
-public class SourceDataLineOutput implements AudioOutput {
+public class SourceDataLineOutputDevice implements AudioOutputDevice {
     private final SourceDataLine audioLine;
 
-    public SourceDataLineOutput() throws LineUnavailableException {
+    public SourceDataLineOutputDevice() throws LineUnavailableException {
         AudioFormat format = new AudioFormat(
                 SAMPLE_RATE,        // Sample rate
                 16,                 // Sample size in bits

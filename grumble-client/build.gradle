@@ -144,11 +144,17 @@ dependencies {
     // openal
     implementation 'org.lwjgl:lwjgl-openal:3.3.6'
 
+    // jnativehook
+    implementation 'com.github.kwhat:jnativehook:2.2.2'
+
     // lwjgl natives
-//    runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-windows"
     runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-linux"
-//    runtimeOnly "org.lwjgl:lwjgl-openal:3.3.6:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-macos"
+
+    runtimeOnly "org.lwjgl:lwjgl-openal:3.3.6:natives-windows"
     runtimeOnly "org.lwjgl:lwjgl-openal:3.3.6:natives-linux"
+    runtimeOnly "org.lwjgl:lwjgl-openal:3.3.6:natives-macos"
 
     // Bonjour
     implementation 'org.jmdns:jmdns:3.5.7'
