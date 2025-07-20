@@ -68,8 +68,12 @@ public class MumbleClient implements Closeable {
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
 
     /* Scheduler */
-    private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
-    private final ExecutorService decodeExecutor = Executors.newCachedThreadPool();
+    private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r);
+        t.setName("event");
+        return t;
+    });
+    private final Map<Long, ExecutorService> decoderExecutors = new ConcurrentHashMap<>();
     private final ScheduledExecutorService pingScheduler = Executors.newSingleThreadScheduledExecutor();
     private final List<ScheduledFuture<?>> scheduledPings = new ArrayList<>();
 
@@ -391,10 +395,6 @@ public class MumbleClient implements Closeable {
     /**
      * Mix all users speaking audio into a single buffer write it to audio output
      */
-    private static final int MAX_PLC = 3;
-    private final Map<Long, Integer> plcCount = new HashMap<>();
-    private static final byte[] EMPTY_BYTES = new byte[0];
-
     private void mixAndPlayAudio() {
         try {
             float[] mix = new float[SAMPLES_PER_FRAME_TOTAL];
@@ -408,15 +408,7 @@ public class MumbleClient implements Closeable {
                 // Try real audio
                 int samples = user.popPcmAudio(buf, SAMPLES_PER_FRAME_TOTAL);
                 if (samples > 0) {
-                    plcCount.remove(session);
                     nowSpeaking = true;
-                }
-                // Try PLC
-                else if (user.isTransmitting() && plcCount.getOrDefault(session, 0) < MAX_PLC) {
-                    samples = opusDecoders.get(session)
-                            .decodeFloat(EMPTY_BYTES, buf, SAMPLES_PER_FRAME);
-                    plcCount.merge(session, 1, Integer::sum);
-                    if (samples > 0) nowSpeaking = true;
                 }
 
                 user.setSpeaking(nowSpeaking);
@@ -574,6 +566,7 @@ public class MumbleClient implements Closeable {
 
         removeUserFromChannel(user);
         opusDecoders.remove(user.getSession());
+        removeDecoderSession(user.getSession());
     }
 
     private void onUserState(MumbleProto.UserState userState) {
@@ -811,10 +804,10 @@ public class MumbleClient implements Closeable {
     private void handleProtobufAudio(MumbleUDPProto.Audio audio) {
         long session = audio.getSenderSession();
         long sequence = audio.getFrameNumber();
-        boolean speaking = audio.getIsTerminator();
+        boolean transmitting = audio.getIsTerminator();
 
         byte[] payload = audio.getOpusData().toByteArray();
-        decodeOpusAndQueue(session, payload, speaking);
+        executeDecoderSession(session, sequence, payload, transmitting);
     }
 
     /**
@@ -848,21 +841,44 @@ public class MumbleClient implements Closeable {
             byte[] payload = new byte[payloadLen];
             data.get(payload);
 
-            decodeExecutor.execute(() -> decodeOpusAndQueue(session, payload, transmitting));
+            executeDecoderSession(session, sequence, payload, transmitting);
         }
     }
 
-    private void decodeOpusAndQueue(long session, byte[] payload, boolean transmitting) {
+    @SuppressWarnings("resource")
+    private void executeDecoderSession(long session, long sequence, byte[] payload, boolean transmitting) {
+        ExecutorService executor = decoderExecutors.computeIfAbsent(session, s ->
+                Executors.newSingleThreadExecutor(r -> {
+                    Thread t = new Thread(r);
+                    t.setName("decoder-" + s);
+                    t.setDaemon(true);
+                    return t;
+                })
+        );
+        executor.execute(() -> decodeOpusAndQueue(session, sequence, payload, transmitting));
+    }
+
+    @SuppressWarnings("resource")
+    public void removeDecoderSession(long session) {
+        ExecutorService exec = decoderExecutors.remove(session);
+        if (exec != null) exec.shutdown();
+    }
+
+    public OpusDecoder getSessionDecoder(long session) {
+        return opusDecoders.computeIfAbsent(session, k -> new OpusDecoder(SAMPLE_RATE, CHANNELS));
+    }
+
+    private void decodeOpusAndQueue(long session, long sequence, byte[] payload, boolean transmitting) {
         MumbleUser user = getUser(session);
         boolean hasUser = (user != null);
 
-        OpusDecoder decoder = opusDecoders.computeIfAbsent(session, k -> new OpusDecoder(SAMPLE_RATE, CHANNELS));
+        OpusDecoder decoder = getSessionDecoder(session);
         int frameSize = decoder.getNbSamples(payload);
         float[] pcm = new float[frameSize * CHANNELS];
         int decodedSamples = decoder.decodeFloat(payload, pcm, frameSize);
 
         if (hasUser) {
-            user.pushPcmAudio(pcm, decodedSamples, transmitting);
+            user.pushPcmAudio(sequence, pcm, decodedSamples, transmitting);
         } else if (LOG.isDebugEnabled()) {
             LOG.debug("Decoded {} samples for early user session {}", decodedSamples, session);
         }
@@ -1200,7 +1216,6 @@ public class MumbleClient implements Closeable {
         return (list != null) ? List.copyOf(list) : Collections.emptyList();
     }
 
-
     /**
      * Returns a list of all MumbleChannel children for a given MumbleChannel
      *
@@ -1238,6 +1253,7 @@ public class MumbleClient implements Closeable {
         opusDecoders.clear();
         if (tcpConnection != null) tcpConnection.close();
         if (udpConnection != null) udpConnection.close();
+        users.values().stream().map(MumbleUser::getSession).forEach(this::removeDecoderSession);
         users.clear();
         channels.clear();
         childrenByParent.clear();

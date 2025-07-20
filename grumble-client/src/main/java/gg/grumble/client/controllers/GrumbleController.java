@@ -1,8 +1,8 @@
 package gg.grumble.client.controllers;
 
-import gg.grumble.client.audio.OpenALOutputDevice;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
+import gg.grumble.client.utils.Closeable;
 import gg.grumble.client.utils.WindowIcon;
 import gg.grumble.core.audio.input.TargetDataLineInputDevice;
 import gg.grumble.core.audio.output.SourceDataLineOutputDevice;
@@ -44,7 +44,7 @@ import java.util.stream.Stream;
 
 @Component
 @WindowIcon("/icons/talking_off.png")
-public class GrumbleController implements Initializable {
+public class GrumbleController implements Initializable, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(GrumbleController.class);
 
     private static final int ICON_SIZE = 20;
@@ -666,6 +666,11 @@ public class GrumbleController implements Initializable {
     }
 
     public void onDisconnect(ActionEvent actionEvent) {
+        client.close();
+    }
+
+    @Override
+    public void close() {
         client.close();
     }
 }

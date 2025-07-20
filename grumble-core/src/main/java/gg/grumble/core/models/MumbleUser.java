@@ -2,13 +2,11 @@ package gg.grumble.core.models;
 
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.enums.MumbleMessageType;
-import gg.grumble.core.utils.FloatRingBuffer;
+import gg.grumble.core.opus.OpusDecoder;
+
 import gg.grumble.mumble.MumbleProto;
 
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 import static gg.grumble.core.enums.MumbleAudioConfig.*;
 
@@ -40,7 +38,11 @@ public class MumbleUser {
 
     private final Set<Integer> listeningChannels = new LinkedHashSet<>();
 
-    private final FloatRingBuffer pcmBuffer = new FloatRingBuffer(SAMPLE_RATE * CHANNELS, JITTER_THRESHOLD);
+    private final TreeMap<Long, float[]> jitterBuffer = new TreeMap<>();
+    private long lastPlayedSequence = -1;
+
+    private int plcCount = 0;
+    private static final byte[] EMPTY_BYTES = new byte[0];
 
     private boolean autoGainEnabled = false;
     private float manualGain = 1.0f;
@@ -183,17 +185,74 @@ public class MumbleUser {
         return client.getChannel(channelId);
     }
 
-    public void pushPcmAudio(float[] decodedPcm, int sampleCount, boolean transmitting) {
+    public void pushPcmAudio(long sequence, float[] decodedPcm, int sampleCount, boolean transmitting) {
         if (transmitting && !this.transmitting) {
-            pcmBuffer.clear();
-            pcmBuffer.resetJitter();
+            // Brand-new transmission
+            jitterBuffer.clear();
+            lastPlayedSequence = sequence - 1;
         }
+
         this.transmitting = transmitting;
-        pcmBuffer.write(decodedPcm, 0, sampleCount);
+
+        // No audio data, user is transmitting silence
+        if (sampleCount <= 0) return;
+
+        // Copy only the needed samples
+        float[] pcm = Arrays.copyOf(decodedPcm, sampleCount);
+        synchronized (jitterBuffer) {
+            if (sequence <= lastPlayedSequence || jitterBuffer.containsKey(sequence)) {
+                // Drop duplicates or too-old frames
+                return;
+            }
+            jitterBuffer.put(sequence, pcm);
+            if (jitterBuffer.size() > 10) {
+                jitterBuffer.pollFirstEntry(); // avoid unbounded growth
+            }
+        }
     }
 
     public int popPcmAudio(float[] out, int maxSamples) {
-        return pcmBuffer.read(out, 0, maxSamples);
+        synchronized (jitterBuffer) {
+            long nextSeq = lastPlayedSequence + 1;
+            float[] frame = jitterBuffer.remove(nextSeq);
+
+            if (frame != null) {
+                // Normal case: expected frame arrived
+                int len = Math.min(frame.length, maxSamples);
+                System.arraycopy(frame, 0, out, 0, len);
+                Arrays.fill(out, len, maxSamples, 0f);
+                lastPlayedSequence = nextSeq;
+                plcCount = 0;
+                return len;
+            }
+
+            // See if any future frame exists at all
+            Map.Entry<Long, float[]> upcoming = jitterBuffer.firstEntry();
+            if (upcoming != null) {
+                long futureSeq = upcoming.getKey();
+                long gap = futureSeq - nextSeq;
+
+                if (gap > MAX_PLC_FRAMES) {
+                    // Too big to fill with PLC → resync
+                    lastPlayedSequence = futureSeq - 1;
+                    plcCount = 0;
+                    return popPcmAudio(out, maxSamples); // retry with adjusted sequence
+                }
+            }
+
+            // Try to fill gap with PLC
+            if (this.transmitting && plcCount < MAX_PLC_FRAMES) {
+                OpusDecoder decoder = client.getSessionDecoder(session);
+                int decoded = decoder.decodeFloat(EMPTY_BYTES, out, SAMPLES_PER_FRAME);
+                plcCount++;
+                lastPlayedSequence = nextSeq;
+                return decoded;
+            }
+
+            // Nothing to play
+            Arrays.fill(out, 0, maxSamples, 0f);
+            return 0;
+        }
     }
 
     public void moveToChannel(MumbleChannel channel) {

@@ -255,6 +255,7 @@ public class MumbleTCPConnection implements Closeable {
         netInBuffer.clear();
         netOutBuffer.clear();
         appInBuffer.clear();
+        LOG.info("TCP connection closed");
     }
 
     private void wakeupSelector() {
