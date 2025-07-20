@@ -192,9 +192,10 @@ public class MumbleUser {
 
     public void pushPcmAudio(long sequence, float[] decodedPcm, int sampleCount, boolean transmitting) {
         if (transmitting && !this.transmitting) {
-            // Brand-new transmission
-            jitterBuffer.clear();
-            lastPlayedSequence = sequence - 1;
+            synchronized (jitterBuffer) {
+                jitterBuffer.clear();
+                lastPlayedSequence = sequence - 1;
+            }
         }
 
         this.transmitting = transmitting;
@@ -238,6 +239,9 @@ public class MumbleUser {
                 long gap = futureSeq - nextSeq;
 
                 if (gap > MAX_PLC_FRAMES) {
+                    if (LOG.isWarnEnabled()) {
+                        LOG.warn("Audio gap too large ({} frames), resynchronizing user {}", gap, name);
+                    }
                     // Too big to fill with PLC → resync
                     lastPlayedSequence = futureSeq - 1;
                     plcCount = 0;
@@ -247,12 +251,21 @@ public class MumbleUser {
 
             // Try to fill gap with PLC
             if (this.transmitting && plcCount < MAX_PLC_FRAMES) {
-                OpusDecoder decoder = client.getSessionDecoder(session);
-                int decoded = decoder.decodeFloat(EMPTY_BYTES, out, SAMPLES_PER_FRAME);
                 plcCount++;
                 lastPlayedSequence = nextSeq;
+
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Generated {} PLC frame", StringUtils.toOrdinal(plcCount));
+                }
+
+                OpusDecoder decoder = client.getSessionDecoder(session);
+                int decoded;
+                synchronized (decoder) {
+                    decoded = decoder.decodeFloat(EMPTY_BYTES, out, SAMPLES_PER_FRAME);
+                    if (decoded <= 0) {
+                        Arrays.fill(out, 0, maxSamples, 0f);
+                        return 0;
+                    }
                 }
                 return decoded;
             }

@@ -230,7 +230,7 @@ public class MumbleOCB2 {
 
         if (decryptHistory[idx] == fullVal) {
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
-            System.out.printf("REPLAY: idx=%d fullVal=%04x decryptIV=%s\n",
+            System.err.printf("REPLAY: idx=%d fullVal=%04x decryptIV=%s\n",
                     idx, fullVal & 0xFFFF, Arrays.toString(decryptIV));
             throw new DecryptException("Replay detected: IV already used at this index");
         }

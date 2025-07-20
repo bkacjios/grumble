@@ -35,6 +35,15 @@ public class OpusDecoder {
         return result * channels;
     }
 
+    public int decodeFloat(byte[] packet, float[] pcm, int offset, int frameSize) {
+        float[] temp = new float[frameSize];
+        int decoded = decodeFloat(packet, temp, frameSize);
+        if (decoded > 0) {
+            System.arraycopy(temp, 0, pcm, offset, decoded);
+        }
+        return decoded;
+    }
+
     public int decodeFloat(byte[] encoded, float[] pcm, int frameSize) {
         return decodeFloat(encoded, pcm, frameSize, false);
     }
