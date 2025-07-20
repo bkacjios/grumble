@@ -4,13 +4,18 @@ import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.enums.MumbleMessageType;
 import gg.grumble.core.opus.OpusDecoder;
 
+import gg.grumble.core.utils.StringUtils;
 import gg.grumble.mumble.MumbleProto;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
 import static gg.grumble.core.enums.MumbleAudioConfig.*;
 
 public class MumbleUser {
+    private static final Logger LOG = LoggerFactory.getLogger(MumbleUser.class);
+
     private final MumbleClient client;
     private final long session;
 
@@ -246,6 +251,9 @@ public class MumbleUser {
                 int decoded = decoder.decodeFloat(EMPTY_BYTES, out, SAMPLES_PER_FRAME);
                 plcCount++;
                 lastPlayedSequence = nextSeq;
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Generated {} PLC frame", StringUtils.toOrdinal(plcCount));
+                }
                 return decoded;
             }
 

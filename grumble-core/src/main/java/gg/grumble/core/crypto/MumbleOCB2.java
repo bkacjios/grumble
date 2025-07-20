@@ -18,7 +18,7 @@ public class MumbleOCB2 {
     private byte[] key;
     private final byte[] encryptIV = new byte[BLOCK_SIZE];
     private final byte[] decryptIV = new byte[BLOCK_SIZE];
-    private final byte[] decryptHistory = new byte[256];
+    private final short[] decryptHistory = new short[256];
     private boolean initialized = false;
 
     public static class DecryptException extends Exception {
@@ -28,7 +28,7 @@ public class MumbleOCB2 {
     }
 
     public MumbleOCB2() {
-        Arrays.fill(decryptHistory, (byte) -1);
+        Arrays.fill(decryptHistory, (short) -1);
     }
 
     public boolean setKey(byte[] key, byte[] clientNonce, byte[] serverNonce) {
@@ -46,7 +46,7 @@ public class MumbleOCB2 {
 
         decryptIV[0] = (byte) ((decryptIV[0] - 1) & 0xFF);
 
-        Arrays.fill(decryptHistory, (byte) -1);
+        Arrays.fill(decryptHistory, (short) -1);
         initialized = true;
         return true;
     }
@@ -226,9 +226,12 @@ public class MumbleOCB2 {
         }
 
         int idx = decryptIV[0] & 0xFF;
-        int decVal = decryptIV[1] & 0xFF;
-        if (decryptHistory[idx] == (byte) decVal) {
+        short fullVal = ByteBuffer.wrap(decryptIV, 1, 2).order(ByteOrder.BIG_ENDIAN).getShort();
+
+        if (decryptHistory[idx] == fullVal) {
             System.arraycopy(saveIV, 0, decryptIV, 0, BLOCK_SIZE);
+            System.out.printf("REPLAY: idx=%d fullVal=%04x decryptIV=%s\n",
+                    idx, fullVal & 0xFFFF, Arrays.toString(decryptIV));
             throw new DecryptException("Replay detected: IV already used at this index");
         }
 
@@ -240,7 +243,9 @@ public class MumbleOCB2 {
             throw new DecryptException("OCB decryption failed: authentication tag mismatch or invalid cipher");
         }
 
-        decryptHistory[idx] = (byte) decVal;
+        if (!restore) {
+            decryptHistory[idx] = fullVal;
+        }
         good++;
         late += lateCount;
         if (lostCount > 0) {

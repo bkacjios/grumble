@@ -43,7 +43,8 @@ public class MumbleClient implements Closeable {
 
     public static final int MUMBLE_DEFAULT_PORT = 64738;
 
-    private static final int UDP_TCP_FALLBACK = 2;
+    private static final int UDP_TCP_PING_FALLBACK = 2;
+    private static final int UDP_TCP_SEND_FALLBACK = 4;
 
     private static final int MUMBLE_VERSION_MAJOR = 1;
     private static final int MUMBLE_VERSION_MINOR = 5;
@@ -100,6 +101,7 @@ public class MumbleClient implements Closeable {
     private boolean legacyConnection = false;
     private boolean tcpUdpTunnel = true;
     private int udpPingAccumulator = 0;
+    private int udpSendErrorAccumulator = 0;
 
     private int tcpPingPackets = 0;
     private float tcpPingAverage = 0;
@@ -274,7 +276,7 @@ public class MumbleClient implements Closeable {
         udpPingDeviation = (float) Math.pow(Math.abs(delay - udpPingAverage), 2);
 
         if (udp && tcpUdpTunnel) {
-            if (udpPingAccumulator >= UDP_TCP_FALLBACK) {
+            if (udpPingAccumulator >= UDP_TCP_PING_FALLBACK || udpSendErrorAccumulator >= UDP_TCP_SEND_FALLBACK) {
                 // We suddenly got a response, after sending out pings with multiple missing responses
                 LOG.warn("[UDP] Server is responding to UDP packets again, disabling TCP tunnel");
             }
@@ -344,11 +346,7 @@ public class MumbleClient implements Closeable {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Sending UDP Protobuf Audio");
             }
-            try {
-                udpConnection.send(crypto.encrypt(audio.build().toByteArray()));
-            } catch (Exception e) {
-                LOG.error("Unable to encrypt or send UDP packet", e);
-            }
+            sendUdp(audio.build().toByteArray());
         }
     }
 
@@ -366,14 +364,13 @@ public class MumbleClient implements Closeable {
      * @param lastFrame If this is the final frame of audio
      */
     private void sendLegacyAudioPacket(byte[] encoded, int encodedLen, boolean lastFrame) {
-
         int header = encodedLen & 0x1FFF;
         if (lastFrame) {
             header |= (1 << 13);
         }
 
         ByteBuffer packet = ByteBuffer.allocate(UDP_BUFFER_MAX);
-        packet.put((byte) (((MumblePacketTypeLegacy.OPUS & 0x7) << 5) | (audioTarget & 0x1F)));
+        packet.put((byte) (((MumblePacketTypeLegacy.OPUS.getId() & 0x7) << 5) | (audioTarget & 0x1F)));
         MumbleVarInt.writeVarInt(packet, audioSequence++);
         MumbleVarInt.writeVarInt(packet, header);
         packet.put(encoded, 0, encodedLen);
@@ -381,14 +378,7 @@ public class MumbleClient implements Closeable {
         if (this.tcpUdpTunnel) {
             send(packet);
         } else {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Sending UDP Legacy Audio");
-            }
-            try {
-                udpConnection.send(crypto.encrypt(packet));
-            } catch (Exception e) {
-                LOG.error("Unable to encrypt or send UDP packet", e);
-            }
+            sendUdp(packet);
         }
     }
 
@@ -744,28 +734,25 @@ public class MumbleClient implements Closeable {
 
     private void handleUdpLegacyPacket(ByteBuffer data, boolean udp) {
         byte header = data.get();
-        byte type = (byte) ((header >> 5) & 0x7);
+        byte typeId = (byte) ((header >> 5) & 0x7);
+        MumblePacketTypeLegacy type = MumblePacketTypeLegacy.fromId(typeId);
+
+        if (type == null) {
+            throw new IllegalStateException("Unhandled legacy UDP packet type: " + typeId);
+        }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Received UDP legacy packet: {}", type);
+            LOG.debug("Received UDP legacy packet: {}", type.name());
         }
 
         switch (type) {
-            case MumblePacketTypeLegacy.PING: {
-                onServerPongUdpLegacy(MumbleVarInt.readVarIntLong(data), udp);
-                break;
-            }
-            case MumblePacketTypeLegacy.OPUS:
-            case MumblePacketTypeLegacy.SPEEX:
-            case MumblePacketTypeLegacy.CELT_ALPHA:
-            case MumblePacketTypeLegacy.CELT_BETA: {
+            case PING -> onServerPongUdpLegacy(MumbleVarInt.readVarIntLong(data), udp);
+            case OPUS, SPEEX, CELT_ALPHA, CELT_BETA -> {
                 byte target = (byte) (header & 0x1F);
-                handleLegacyAudio(target, type, data); // id is codec in this case
-                break;
+                handleLegacyAudio(target, type, data);
             }
-            default:
-                throw new IllegalStateException("Tried to process unhandled legacy UDP packet: " + type);
         }
+
     }
 
     private void handleUdpProtobufPacket(ByteBuffer data, boolean udp) {
@@ -818,30 +805,37 @@ public class MumbleClient implements Closeable {
      * @param codec  Audio codec of the audio data
      * @param data   The data we received
      */
-    private void handleLegacyAudio(byte target, byte codec, ByteBuffer data) {
+    private void handleLegacyAudio(byte target, MumblePacketTypeLegacy codec, ByteBuffer data) {
         long session = MumbleVarInt.readVarIntLong(data);
         long sequence = MumbleVarInt.readVarIntLong(data);
 
         boolean transmitting;
         int payloadLen;
-        if (codec == MumblePacketTypeLegacy.SPEEX || codec == MumblePacketTypeLegacy.CELT_ALPHA || codec == MumblePacketTypeLegacy.CELT_BETA) {
-            byte frameHeader = data.get();
-            payloadLen = frameHeader & 0x7F;
-            transmitting = ((frameHeader & 0x80) == 0);
 
-            byte[] payload = new byte[payloadLen];
-            data.get(payload);
+        switch (codec) {
+            case SPEEX, CELT_ALPHA, CELT_BETA -> {
+                byte frameHeader = data.get();
+                payloadLen = frameHeader & 0x7F;
+                transmitting = ((frameHeader & 0x80) == 0);
 
-            // Handle SPEEX/CELT?
-        } else if (codec == MumblePacketTypeLegacy.OPUS) {
-            long frameHeader = MumbleVarInt.readVarIntLong(data);
-            payloadLen = Math.toIntExact(frameHeader & 0x1FFF);
-            transmitting = ((frameHeader & 0x2000) == 0);
+                byte[] payload = new byte[payloadLen];
+                data.get(payload);
 
-            byte[] payload = new byte[payloadLen];
-            data.get(payload);
+                // TODO: handle SPEEX/CELT_ALPHA/CELT_BETA audio
+            }
+            case OPUS -> {
+                long frameHeader = MumbleVarInt.readVarIntLong(data);
+                payloadLen = Math.toIntExact(frameHeader & 0x1FFF);
+                transmitting = ((frameHeader & 0x2000) == 0);
 
-            executeDecoderSession(session, sequence, payload, transmitting);
+                byte[] payload = new byte[payloadLen];
+                data.get(payload);
+
+                executeDecoderSession(session, sequence, payload, transmitting);
+            }
+            default -> {
+                throw new IllegalArgumentException("Unsupported codec: " + codec);
+            }
         }
     }
 
@@ -1072,7 +1066,11 @@ public class MumbleClient implements Closeable {
      * @param message The UDP message we want to tunnel
      */
     private synchronized void send(ByteBuffer message) {
-        ByteBuffer framed = frameMessage(MumbleMessageType.UDP_TUNNEL, message.array());
+        byte[] data = new byte[message.remaining()];
+        message.mark();
+        message.get(data);
+        message.reset();
+        ByteBuffer framed = frameMessage(MumbleMessageType.UDP_TUNNEL, data);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Sending Legacy TCP {}: {}", MumbleMessageType.UDP_TUNNEL.name(), toHex(framed));
@@ -1098,6 +1096,31 @@ public class MumbleClient implements Closeable {
         }
 
         tcpConnection.send(framed);
+    }
+
+    private void sendUdp(ByteBuffer buffer) {
+        byte[] data = new byte[buffer.remaining()];
+        buffer.mark();
+        buffer.get(data);
+        buffer.reset();
+        if (LOG.isDebugEnabled()) {
+            byte type = (byte) ((data[0] >> 5) & 0x7);
+            LOG.debug("Sending UDP Legacy {} packet", MumblePacketTypeLegacy.fromId(type));
+        }
+        sendUdp(data);
+    }
+
+    private void sendUdp(byte[] data) {
+        try {
+            udpConnection.send(crypto.encrypt(data));
+            udpSendErrorAccumulator = 0;
+        } catch (IOException e) {
+            if (++udpSendErrorAccumulator > UDP_TCP_PING_FALLBACK && !tcpUdpTunnel) {
+                LOG.warn("Failed to send {} UDP packets, falling back to TCP", udpSendErrorAccumulator);
+                tcpUdpTunnel = true;
+            }
+            LOG.error("Unable to send UDP packet", e);
+        }
     }
 
     private static ByteBuffer frameMessage(MumbleMessageType type, byte[] protobufBytes) {
@@ -1149,30 +1172,19 @@ public class MumbleClient implements Closeable {
     private void pingUdp() {
         if (legacyConnection) {
             ByteBuffer packet = ByteBuffer.allocate(UDP_BUFFER_MAX);
-            packet.put((byte) (MumblePacketTypeLegacy.PING << 5));
+            packet.put((byte) (MumblePacketTypeLegacy.PING.getId() << 5));
             MumbleVarInt.writeVarInt(packet, System.nanoTime());
             packet.flip();
-            try {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Sending UDP Legacy Ping");
-                }
-                udpConnection.send(crypto.encrypt(packet));
-            } catch (Exception e) {
-                LOG.error("Unable to encrypt or send UDP packet", e);
-            }
+            sendUdp(packet);
         } else {
             MumbleUDPProto.Ping.Builder ping = MumbleUDPProto.Ping.newBuilder();
             ping.setTimestamp(System.nanoTime());
-            try {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Sending UDP Protobuf Ping");
-                }
-                udpConnection.send(crypto.encrypt(ping.build().toByteArray()));
-            } catch (Exception e) {
-                LOG.error("Unable to encrypt or send UDP packet", e);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Sending UDP Protobuf Ping");
             }
+            sendUdp(ping.build().toByteArray());
         }
-        if (udpPingAccumulator >= UDP_TCP_FALLBACK && !tcpUdpTunnel) {
+        if (udpPingAccumulator >= UDP_TCP_PING_FALLBACK && !tcpUdpTunnel) {
             // We didn't get a response from a ping 3 times in a row
             LOG.warn("[UDP] Server no longer responding to UDP pings, falling back to TCP..");
             tcpUdpTunnel = true;
