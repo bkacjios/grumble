@@ -52,7 +52,7 @@ public class MumbleClient implements Closeable {
 
     private static final int UDP_BUFFER_MAX = 1024;
 
-    private static final float PING_MILLIS = 1e6f;
+    private static final float NANOS_PER_MS = 1e6f;
     private static final int PING_PERIOD_SECONDS = 5;
 
     private static final int MUMBLE_VERSION_v1 = MUMBLE_VERSION_MAJOR << 16 | MUMBLE_VERSION_MINOR << 8 | MUMBLE_VERSION_PATCH;
@@ -68,17 +68,21 @@ public class MumbleClient implements Closeable {
     private final OpusEncoder opusEncoder;
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
 
-    /* Scheduler */
+    /* Single thread event scheduler, since we want all events to be processed in order */
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r);
         t.setName("event");
         return t;
     });
+
+    /* Cached thread pool, so we spin up as many threads as we need */
     private final ExecutorService decoderExecutor = Executors.newCachedThreadPool();
+
+    /* Should just contain our scheduled TCP and UDP ping events */
     private final ScheduledExecutorService pingScheduler = Executors.newSingleThreadScheduledExecutor();
     private final List<ScheduledFuture<?>> scheduledPings = new ArrayList<>();
 
-    /* Data caches */
+    /* Data caches for quick lookups */
     private final Map<Long, MumbleUser> users = new HashMap<>();
     private final Map<Long, MumbleChannel> channels = new HashMap<>();
     private final Map<Long, List<MumbleChannel>> childrenByParent = new HashMap<>();
@@ -92,6 +96,9 @@ public class MumbleClient implements Closeable {
     private MumbleUDPConnection udpConnection;
 
     private MumbleUser self;
+
+    private boolean transmitting = true;
+    private boolean wasTransmitting = false;
 
     private boolean synced = false;
 
@@ -228,7 +235,7 @@ public class MumbleClient implements Closeable {
         long now = System.nanoTime();
         long time = ping.getTimestamp();
 
-        float delay = (now - time) / PING_MILLIS;
+        float delay = (now - time) / NANOS_PER_MS;
 
         float n = ++tcpPingPackets;
         tcpPingAverage += (delay - tcpPingAverage) / n;
@@ -269,7 +276,7 @@ public class MumbleClient implements Closeable {
     private float updateUdpPing(long timestamp, boolean udp) {
         long now = System.nanoTime();
 
-        float delay = (now - timestamp) / PING_MILLIS;
+        float delay = (now - timestamp) / NANOS_PER_MS;
 
         float n = ++udpPingPackets;
         udpPingAverage += (delay - udpPingAverage) / n;
@@ -318,20 +325,50 @@ public class MumbleClient implements Closeable {
         scheduledPings.clear();
     }
 
-    private void encodeAndSendAudio(byte[] bytes) {
-        short[] pcm = bytesToShorts(bytes);
-        int frameSize = pcm.length;
-
-        pcm = denoiser.denoise(pcm);
-
-        byte[] encoded = new byte[UDP_BUFFER_MAX];
-        int encodedLen = opusEncoder.encode(pcm, frameSize, encoded);
-
-        if (this.legacyConnection) {
-            sendLegacyAudioPacket(encoded, encodedLen, false);
-        } else {
-            sendProtobufAudioPacket(encoded, false);
+    private boolean isVoiceActive(short[] pcm, int threshold) {
+        long sum = 0;
+        for (short sample : pcm) {
+            sum += sample * sample;
         }
+
+        double rms = Math.sqrt(sum / (double) pcm.length);
+        return rms > threshold;
+    }
+
+    private void encodeAndSendAudio(byte[] bytes) {
+        // Handle speaking state transition
+        if (!wasTransmitting && transmitting) {
+            self.setSpeaking(true);
+            fireEvent(new MumbleEvents.UserStartSpeaking(self));
+        }
+
+        if (wasTransmitting && !transmitting) {
+            self.setSpeaking(false);
+            fireEvent(new MumbleEvents.UserStopSpeaking(self));
+        }
+
+        // Send audio if transmitting or it's the last frame
+        if (transmitting || wasTransmitting) {
+            // Convert to shorts
+            short[] pcm = bytesToShorts(bytes);
+            int frameSize = pcm.length;
+
+            // RNNoise
+            pcm = denoiser.denoise(pcm);
+
+            // Encode frame
+            byte[] encoded = new byte[UDP_BUFFER_MAX];
+            int encodedLen = opusEncoder.encode(pcm, frameSize, encoded);
+
+            boolean lastFrame = !transmitting;
+            if (legacyConnection) {
+                sendLegacyAudioPacket(encoded, encodedLen, lastFrame);
+            } else {
+                sendProtobufAudioPacket(encoded, lastFrame);
+            }
+        }
+
+        wasTransmitting = transmitting;
     }
 
     private void sendProtobufAudioPacket(byte[] encoded, boolean lastFrame) {
@@ -391,7 +428,9 @@ public class MumbleClient implements Closeable {
             float[] buf = new float[SAMPLES_PER_FRAME_TOTAL];
 
             for (MumbleUser user : users.values()) {
-                long session = user.getSession();
+                // Skip ourselves during playback
+                if (user == self) continue;
+
                 boolean wasSpeaking = user.isSpeaking();
                 boolean nowSpeaking = false;
 
@@ -1244,6 +1283,14 @@ public class MumbleClient implements Closeable {
      */
     public MumbleUser getSelf() {
         return this.self;
+    }
+
+    public boolean isTransmitting() {
+        return transmitting;
+    }
+
+    public void setTransmitting(boolean transmitting) {
+        this.transmitting = transmitting;
     }
 
     @Override
