@@ -36,7 +36,7 @@ import java.util.function.Predicate;
 import static gg.grumble.core.enums.MumbleAudioConfig.*;
 import static gg.grumble.core.utils.AudioUtils.bytesToShorts;
 import static gg.grumble.core.utils.AudioUtils.shortsToBytes;
-import static tomp2p.opuswrapper.Opus.OPUS_APPLICATION_VOIP;
+import static tomp2p.opuswrapper.Opus.OPUS_APPLICATION_RESTRICTED_LOWDELAY;
 
 public class MumbleClient implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(MumbleClient.class);
@@ -122,7 +122,7 @@ public class MumbleClient implements Closeable {
         try {
             OpusLibrary.loadFromJar();
             this.denoiser = new Denoiser();
-            this.opusEncoder = new OpusEncoder(SAMPLE_RATE, 1, OPUS_APPLICATION_VOIP);
+            this.opusEncoder = new OpusEncoder(SAMPLE_RATE, 1, OPUS_APPLICATION_RESTRICTED_LOWDELAY);
         } catch (IOException e) {
             throw new RuntimeException("Failed to load opus library", e);
         } catch (UnknownPlatformException e) {

@@ -1,5 +1,9 @@
 package gg.grumble.client.controllers;
 
+import com.github.kwhat.jnativehook.GlobalScreen;
+import com.github.kwhat.jnativehook.NativeHookException;
+import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent;
+import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.client.utils.Closeable;
@@ -44,7 +48,7 @@ import java.util.stream.Stream;
 
 @Component
 @WindowIcon("/icons/talking_off.png")
-public class GrumbleController implements Initializable, Closeable {
+public class GrumbleController implements Initializable, Closeable, NativeKeyListener {
     private static final Logger LOG = LoggerFactory.getLogger(GrumbleController.class);
 
     private static final int ICON_SIZE = 20;
@@ -121,8 +125,33 @@ public class GrumbleController implements Initializable, Closeable {
     }
 
     @Override
+    public void nativeKeyPressed(NativeKeyEvent e) {
+        if (e.getKeyCode() == NativeKeyEvent.VC_F13) {
+            client.setTransmitting(true);
+        }
+    }
+
+    @Override
+    public void nativeKeyReleased(NativeKeyEvent e) {
+        if (e.getKeyCode() == NativeKeyEvent.VC_F13) {
+            client.setTransmitting(false);
+        }
+    }
+
+    @Override
+    public void nativeKeyTyped(NativeKeyEvent e) {}
+
+    @Override
     public void initialize(URL location, ResourceBundle resources) {
         loadIcons();
+
+        try {
+            GlobalScreen.registerNativeHook();
+        } catch (NativeHookException e) {
+            LOG.error("Unable to register native hook", e);
+        }
+
+        GlobalScreen.addNativeKeyListener(this);
 
         client.connect("pi-two.lan");
 
@@ -480,7 +509,8 @@ public class GrumbleController implements Initializable, Closeable {
      * Build the tree view for Channels and Users
      */
     private TreeItem<Object> buildTree(MumbleChannel channel) {
-        List<TreeItem<Object>> children = new ArrayList<>();
+        TreeItem<Object> parentItem = new TreeItem<>(channel);
+        channelNodeMap.put(channel, parentItem);
 
         // 1) add all users (sorted) first
         channel.getUsers().stream()
@@ -490,18 +520,20 @@ public class GrumbleController implements Initializable, Closeable {
                     TreeItem<Object> userItem = new TreeItem<>(fx);
                     userFxMap.put(fx.getUser(), fx);
                     userNodeMap.put(fx.getUser(), userItem);
-                    children.add(userItem);
+                    parentItem.getChildren().add(userItem);
                 });
 
         // 2) then add all sub-channels (sorted)
         channel.getChildren().stream()
                 .sorted(this::sortChannel)
-                .forEach(sub -> children.add(buildTree(sub)));
+                .forEach(sub -> parentItem.getChildren().add(buildTree(sub)));
 
-        TreeItem<Object> channelItem = new TreeItem<>(channel);
-        channelItem.getChildren().setAll(children);
-        channelNodeMap.put(channel, channelItem);
-        return channelItem;
+        // 3) Expand self & parents if we have users
+        if (containsUserDescendant(parentItem)) {
+            expandPath(parentItem);
+        }
+
+        return parentItem;
     }
 
     /**

@@ -219,25 +219,34 @@ public class MumbleUser {
 
     public int popPcmAudio(float[] out, int maxSamples) {
         synchronized (jitterBuffer) {
-            long nextSeq = lastPlayedSequence + 1;
-            float[] frame = jitterBuffer.remove(nextSeq);
+            int filled = 0;
 
-            if (frame != null) {
-                // Normal case: expected frame arrived
-                int len = Math.min(frame.length, maxSamples);
-                System.arraycopy(frame, 0, out, 0, len);
-                Arrays.fill(out, len, maxSamples, 0f);
+            // Pull as many in‐order frames as needed to fill maxSamples
+            while (filled < maxSamples) {
+                long nextSeq = lastPlayedSequence + 1;
+                float[] frame = jitterBuffer.remove(nextSeq);
+                if (frame == null) break;
+
+                int toCopy = Math.min(frame.length, maxSamples - filled);
+                System.arraycopy(frame, 0, out, filled, toCopy);
+                filled += toCopy;
+
                 lastPlayedSequence = nextSeq;
                 plcCount = 0;
-                return len;
             }
 
-            // See if any future frame exists at all
+            // If we got any real audio, pad the rest with silence and return full buffer
+            if (filled > 0) {
+                Arrays.fill(out, filled, maxSamples, 0f);
+                return maxSamples;
+            }
+
+            // No queued frames → try PLC / resync / silence
+            long nextSeq = lastPlayedSequence + 1;
             Map.Entry<Long, float[]> upcoming = jitterBuffer.firstEntry();
             if (upcoming != null) {
                 long futureSeq = upcoming.getKey();
                 long gap = futureSeq - nextSeq;
-
                 if (gap > MAX_PLC_FRAMES) {
                     if (LOG.isWarnEnabled()) {
                         LOG.warn("Audio gap too large ({} frames), resynchronizing user {}", gap, name);
@@ -262,11 +271,12 @@ public class MumbleUser {
                 int decoded;
                 synchronized (decoder) {
                     decoded = decoder.decodeFloat(EMPTY_BYTES, out, SAMPLES_PER_FRAME);
-                    if (decoded <= 0) {
-                        Arrays.fill(out, 0, maxSamples, 0f);
-                        return 0;
-                    }
                 }
+                if (decoded <= 0) {
+                    Arrays.fill(out, 0, maxSamples, 0f);
+                    return 0;
+                }
+                Arrays.fill(out, decoded, maxSamples, 0f);
                 return decoded;
             }
 
