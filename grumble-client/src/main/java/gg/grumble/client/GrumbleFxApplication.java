@@ -7,23 +7,31 @@ import javafx.application.Platform;
 import javafx.stage.Stage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 
 public class GrumbleFxApplication extends Application {
     private static final Logger LOG = LogManager.getLogger(GrumbleFxApplication.class);
 
-    private static ConfigurableApplicationContext context;
-    private static FxmlLoaderService fxmlLoaderService;
-
-    public static void setApplicationContext(ConfigurableApplicationContext applicationContext) {
-        context = applicationContext;
-        fxmlLoaderService = context.getBean(FxmlLoaderService.class);
-    }
+    private ConfigurableApplicationContext context;
+    private FxmlLoaderService fxmlLoaderService;
 
     @Override
     public void init() {
         Thread.currentThread().setName("main");
         ExceptionHandler.installHandlerForCurrentThread();
+
+        SpringApplicationBuilder builder = new SpringApplicationBuilder(GrumbleLauncherConfig.class)
+                .web(WebApplicationType.NONE)
+                .initializers(ctx ->
+                        ctx.getBeanFactory()
+                                .registerSingleton("hostServices", getHostServices())
+                );
+
+        String[] args = getParameters().getRaw().toArray(new String[0]);
+        context = builder.run(args);
+        fxmlLoaderService = context.getBean(FxmlLoaderService.class);
     }
 
     @Override

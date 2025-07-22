@@ -123,9 +123,9 @@ public class MumbleChannel {
 		MumbleProto.TextMessage.Builder textMessage = MumbleProto.TextMessage.newBuilder();
 		textMessage.setMessage(message);
 		if (recursive) {
-			textMessage.addChannelId((int) this.channelId);
-		} else {
 			textMessage.addTreeId((int) this.channelId);
+		} else {
+			textMessage.addChannelId((int) this.channelId);
 		}
 		client.send(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
 	}
@@ -186,6 +186,10 @@ public class MumbleChannel {
 			}
 		}
 		return current;
+	}
+
+	public String getUrl() {
+		return String.format("<a href='channelid://%d' class='log-channel'>%s</a>", channelId, name);
 	}
 
 	@Override

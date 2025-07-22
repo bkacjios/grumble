@@ -24,8 +24,9 @@ public class MumbleTCPConnection implements Closeable {
 
     private final ExecutorService executor;
     private final BlockingQueue<ByteBuffer> sendQueue = new LinkedBlockingQueue<>();
-    private final ByteBuffer netOutBuffer = ByteBuffer.allocate(32768);
-    private final ByteBuffer netInBuffer = ByteBuffer.allocate(32768);
+    private ByteBuffer netOutBuffer;
+    private ByteBuffer netInBuffer;
+    private ByteBuffer appInBuffer;
 
     private SocketChannel channel;
     private SSLEngine sslEngine;
@@ -62,6 +63,12 @@ public class MumbleTCPConnection implements Closeable {
                 sslEngine = sslContext.createSSLEngine(hostname, port);
                 sslEngine.setUseClientMode(true);
                 sslEngine.beginHandshake();
+
+                // ← Resize your buffers right here, before handshake I/O begins
+                SSLSession session = sslEngine.getSession();
+                netInBuffer   = ByteBuffer.allocate(session.getPacketBufferSize());
+                netOutBuffer  = ByteBuffer.allocate(session.getPacketBufferSize());
+                appInBuffer   = ByteBuffer.allocate(session.getApplicationBufferSize());
 
                 runLoop();
             } catch (Exception e) {
@@ -110,8 +117,6 @@ public class MumbleTCPConnection implements Closeable {
         LOG.info("TCP listener thread exited");
         onDisconnected.accept("Disconnected");
     }
-
-    private final ByteBuffer appInBuffer = ByteBuffer.allocate(32768);
 
     private void doHandshake(SelectionKey key) throws IOException {
         SSLEngineResult.HandshakeStatus status = sslEngine.getHandshakeStatus();
@@ -196,6 +201,13 @@ public class MumbleTCPConnection implements Closeable {
                 case BUFFER_UNDERFLOW -> {
                     netInBuffer.compact();
                     return;
+                }
+                case BUFFER_OVERFLOW -> {
+                    // application buffer too small → grow it
+                    ByteBuffer bigger = ByteBuffer.allocate(appInBuffer.capacity() * 2);
+                    appInBuffer.flip();
+                    bigger.put(appInBuffer);
+                    appInBuffer = bigger;
                 }
                 case CLOSED -> {
                     close();

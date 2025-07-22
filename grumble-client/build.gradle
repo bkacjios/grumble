@@ -138,14 +138,18 @@ dependencies {
     // richtextfx
     implementation 'org.fxmisc.richtext:richtextfx:0.11.5'
 
+    // fasterxml (XML parsing)
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml'
 
-    // openal
+    // openal (Audio alternative)
     implementation 'org.lwjgl:lwjgl-openal:3.3.6'
 
-    // jnativehook
+    // jnativehook (Global keybinds)
     implementation 'com.github.kwhat:jnativehook:2.2.2'
+
+    // jsoup (HTML parsing)
+    implementation 'org.jsoup:jsoup:1.21.1'
 
     // lwjgl natives
     runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-windows"

@@ -356,6 +356,10 @@ public class MumbleUser {
         this.manualGain = manualGain;
     }
 
+    public String getUrl() {
+        return String.format("<a href='clientid://%s' class='log-user'>%s</a>", session, name);
+    }
+
     @Override
     public String toString() {
         return "MumbleUser{" +

@@ -1,0 +1,42 @@
+.chat-area {
+    -fx-background-color: #2b2b2b;
+    -fx-font-family: "Consolas", monospace;
+    -fx-font-size: 11pt;
+}
+
+.chat-area .text {
+    -fx-fill: white;
+}
+.chat-area .text.timestamp {
+    -fx-fill: gray;
+}
+.chat-area .text.sender {
+    -fx-fill: #27AE60;
+    -fx-font-weight: bold;
+}
+.chat-area .text.bold {
+    -fx-font-weight: bold;
+}
+.chat-area .text.italic {
+    -fx-font-style: italic;
+}
+.chat-area .text.underline {
+    -fx-underline: true;
+}
+.chat-area .text.hyperlink {
+    -fx-underline: true;
+    -fx-fill: #00A2E8;
+    -fx-cursor: hand;
+}
+/* channel links */
+.chat-area .text.log-channel {
+    -fx-font-weight: bold;
+    -fx-fill: #F39C12;
+    -fx-cursor: hand;
+}
+/* user links */
+.chat-area .text.log-user {
+    -fx-font-weight: bold;
+    -fx-fill: #27AE60;
+    -fx-cursor: hand;
+}

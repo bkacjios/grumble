@@ -7,6 +7,7 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.client.utils.Closeable;
+import gg.grumble.client.utils.ExceptionHandler;
 import gg.grumble.client.utils.WindowIcon;
 import gg.grumble.core.audio.input.TargetDataLineInputDevice;
 import gg.grumble.core.audio.output.SourceDataLineOutputDevice;
@@ -14,6 +15,8 @@ import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleChannel;
 import gg.grumble.core.models.MumbleUser;
+import gg.grumble.mumble.MumbleProto;
+import javafx.application.HostServices;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
@@ -23,6 +26,9 @@ import javafx.fxml.Initializable;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.*;
+import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.TextArea;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
@@ -37,13 +43,20 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Pair;
+import org.fxmisc.richtext.StyleClassedTextArea;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.sound.sampled.LineUnavailableException;
 import java.net.URL;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.List;
 import java.util.stream.Stream;
 
 @Component
@@ -53,18 +66,26 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
     private static final int ICON_SIZE = 20;
 
+    private record HyperlinkInfo(int start, int end, String href) {
+    }
+
     @FXML
     public TreeView<Object> mumbleTree;
+    @FXML
+    public StyleClassedTextArea chatArea;
     @FXML
     public TextArea chatMessage;
 
     private final FxmlLoaderService fxmlLoaderService;
+    private final HostServices hostServices;
 
     private final MumbleClient client = new MumbleClient();
 
     private final Map<MumbleChannel, TreeItem<Object>> channelNodeMap = new HashMap<>();
     private final Map<MumbleUser, MumbleUserFx> userFxMap = new HashMap<>();
     private final Map<MumbleUser, TreeItem<Object>> userNodeMap = new HashMap<>();
+
+    private final List<HyperlinkInfo> links = new ArrayList<>();
 
     // Icons
     private Image channelIcon;
@@ -77,12 +98,13 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     private Image userServerDeafIcon;
     private Image userAuthenticatedIcon;
 
-    public GrumbleController(FxmlLoaderService fxmlLoaderService) throws LineUnavailableException {
+    public GrumbleController(FxmlLoaderService fxmlLoaderService, HostServices hostServices) throws LineUnavailableException {
         this.fxmlLoaderService = fxmlLoaderService;
+        this.hostServices = hostServices;
 
         client.setAudioOutput(new SourceDataLineOutputDevice());
         client.setAudioInput(new TargetDataLineInputDevice());
-        client.setVolume(0.1f);
+        client.setVolume(0.05f);
     }
 
     private void loadIcons() {
@@ -139,11 +161,13 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     }
 
     @Override
-    public void nativeKeyTyped(NativeKeyEvent e) {}
+    public void nativeKeyTyped(NativeKeyEvent e) {
+    }
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         loadIcons();
+        initializeChat();
 
         try {
             GlobalScreen.registerNativeHook();
@@ -154,22 +178,27 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         GlobalScreen.addNativeKeyListener(this);
 
         client.connect("pi-two.lan");
+        addMessage("Connecting to server pi-two.lan");
 
         client.addEventListener(MumbleEvents.Connected.class, ignored -> {
             client.authenticate("Java-BOT");
+            Platform.runLater(() -> addMessage("Connected."));
         });
         client.addEventListener(MumbleEvents.Disconnected.class, event -> {
             LOG.warn("Disconnected from mumble server: {}", event.reason());
             channelNodeMap.clear();
             userFxMap.clear();
             userNodeMap.clear();
-            Platform.runLater(() -> mumbleTree.setRoot(null));
+            Platform.runLater(() -> {
+                mumbleTree.setRoot(null);
+                addMessage("Disconnected from server.");
+            });
         });
-        client.addEventListener(MumbleEvents.ServerSync.class, ignored -> {
-            LOG.info("Server synced");
+        client.addEventListener(MumbleEvents.ServerSync.class, event -> {
             TreeItem<Object> rootItem = buildTree(client.getChannel(0));
             rootItem.setExpanded(true);
             Platform.runLater(() -> {
+                addMessage("Welcome message: " + event.sync().getWelcomeText());
                 mumbleTree.setRoot(rootItem);
                 mumbleTree.setShowRoot(true);
             });
@@ -209,10 +238,23 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 MumbleUser user = event.user();
                 removeUserFromChannel(user, event.from());
                 addUserToChannel(user, event.to());
+                if (user == client.getSelf()) {
+                    addMessage(String.format("You joined %s.", event.to().getUrl()));
+                } else if (client.getSelf().getChannel() == event.to()) {
+                    addMessage(String.format("%s entered channel.", event.user().getUrl()));
+                } else {
+                    addMessage(String.format("%s moved to %s.", event.user().getUrl(), event.to().getUrl()));
+                }
             });
         });
-
-        initializeChat();
+        client.addEventListener(MumbleEvents.TextMessage.class, event -> {
+            Platform.runLater(() -> {
+                MumbleProto.TextMessage message = event.message();
+                MumbleUser sender = client.getUser(message.getActor());
+                addMessage(String.format("%s: %s", sender.getUrl(), message.getMessage()));
+                LOG.info("Message: {}", message.getMessage());
+            });
+        });
 
         chatMessage.promptTextProperty().bind(
                 Bindings.createStringBinding(() -> {
@@ -248,9 +290,10 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
             private final ImageView userServerMute = new ImageView(userServerMuteIcon);
             private final ImageView userServerDeaf = new ImageView(userServerDeafIcon);
             private final ImageView userAuthenticated = new ImageView(userAuthenticatedIcon);
+
             {
                 Stream.of(channelView, user, userSpeaking, userSpeakingMuted, userSelfMute, userSelfDeaf,
-                        userServerDeaf,userServerMute, userAuthenticated).forEach(view -> {
+                        userServerDeaf, userServerMute, userAuthenticated).forEach(view -> {
                     view.setFitWidth(ICON_SIZE);
                     view.setFitHeight(ICON_SIZE);
                 });
@@ -466,6 +509,22 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     }
 
     private void initializeChat() {
+        chatArea.setEditable(false);
+        chatArea.setWrapText(true);
+
+        addMessage("Welcome to Mumble.");
+
+        chatArea.setOnMouseClicked(evt -> {
+            var hit = chatArea.hit(evt.getX(), evt.getY());
+            int pos = hit.getInsertionIndex();
+            for (HyperlinkInfo link : links) {
+                if (pos >= link.start && pos < link.end) {
+                    handleLink(link.href);
+                    break;
+                }
+            }
+        });
+
         chatMessage.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
             if (event.getCode() == KeyCode.ENTER) {
                 // always consume, so nothing is ever auto-inserted
@@ -485,6 +544,172 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         });
     }
 
+    private void handleLink(String href) {
+        if (href.startsWith("channelid://")) {
+            long id = Long.parseLong(href.substring("channelid://".length()));
+            selectChannel(id);
+        } else if (href.startsWith("clientid://")) {
+            long session = Long.parseLong(href.substring("clientid://".length()));
+            selectUser(session);
+        } else if (href.startsWith("http://") || href.startsWith("https://")) {
+            // open in system browser
+            hostServices.showDocument(href);
+        }
+    }
+
+    /**
+     * Select the channel node for the given channel id
+     */
+    private void selectChannel(long channelId) {
+        channelNodeMap.keySet().stream()
+                .filter(ch -> ch.getChannelId() == channelId)
+                .findFirst()
+                .map(channelNodeMap::get)
+                .ifPresent(item -> {
+                    Platform.runLater(() -> {
+                        expandPath(item);
+                        mumbleTree.getSelectionModel().select(item);
+                        mumbleTree.scrollTo(mumbleTree.getRow(item));
+                    });
+                });
+    }
+
+    /**
+     * Select the user node for the given user session id
+     */
+    private void selectUser(long session) {
+        userNodeMap.keySet().stream()
+                .filter(user -> user.getSession() == session)
+                .findFirst()
+                .map(userNodeMap::get)
+                .ifPresent(item -> {
+                    Platform.runLater(() -> {
+                        expandPath(item);
+                        mumbleTree.getSelectionModel().select(item);
+                        mumbleTree.scrollTo(mumbleTree.getRow(item));
+                    });
+                });
+    }
+
+    private void addMessage(String message) {
+        if (message == null || message.isEmpty()) return;
+
+        // timestamp
+        String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        int start = chatArea.getLength();
+        chatArea.appendText("[" + time + "] ");
+        chatArea.setStyleClass(start, start + time.length() + 2, "timestamp");
+
+        // message body
+        appendHtmlFragment(message);
+
+        int len = chatArea.getLength();
+        if (len <= 0 || !"\n".equals(chatArea.getText(len-1, len))) {
+            chatArea.appendText("\n");
+        }
+
+        int nlStart = chatArea.getLength() - 1;
+        chatArea.clearStyle(nlStart, nlStart + 1);
+
+        // scroll to bottom
+        chatArea.showParagraphAtBottom(chatArea.getCurrentParagraph());
+    }
+
+    /**
+     * Parses the given HTML fragment and appends it to chatArea,
+     * carrying along the `baseStyles` for every text node.
+     */
+    private void appendHtmlFragment(String html) {
+        org.jsoup.nodes.Document doc = Jsoup.parseBodyFragment(html);
+        for (org.jsoup.nodes.Node node : doc.body().childNodes()) {
+            // seed with "message" so every run gets your white fill
+            recurseAppend(node, new ArrayList<>(List.of("message")));
+        }
+    }
+
+    private void recurseAppend(org.jsoup.nodes.Node node, List<String> styles) {
+        if (node instanceof TextNode) {
+            String txt = ((TextNode) node).text();
+            if (!txt.isEmpty()) {
+                int start = chatArea.getLength();
+                chatArea.appendText(txt);
+                chatArea.setStyle(start, start + txt.length(), styles);
+            }
+        } else if (node instanceof Element el) {
+            String tag = el.tagName().toLowerCase();
+
+            if ("br".equals(tag)) {
+                chatArea.appendText("\n");
+                return;
+            }
+
+            // clone styles so we don't mutate the parent list
+            List<String> newStyles = new ArrayList<>(styles);
+
+//            if ("img".equals(tag)) {
+//                String src = el.attr("src");
+//                if (src.startsWith("data:image/")) {
+//                    String b64 = src.substring(src.indexOf(',') + 1);
+//                    byte[] data = Base64.getDecoder().decode(b64);
+//                    Image img = new Image(new ByteArrayInputStream(data));
+//
+//                    ImageView iv = new ImageView(img);
+//                    iv.setFitHeight(16);        // thumbnail height
+//                    iv.setPreserveRatio(true);
+//
+//                    // embed at current caret position
+//                    int pos = chatArea.getLength();
+//                    chatArea.insertNode(pos, iv);
+//                }
+//                return;
+//            }
+
+            if ("a".equals(tag)) {
+                String href = el.attr("href");
+                int linkStart = chatArea.getLength();
+
+                if (el.className().isBlank()) {
+                    newStyles.add("hyperlink");
+                } else {
+                    newStyles.addAll(Arrays.asList(el.className().split("\\s+")));
+                }
+
+                // recurse into the anchor’s children
+                for (org.jsoup.nodes.Node child : el.childNodes()) {
+                    recurseAppend(child, newStyles);
+                }
+
+                // record where this link ends
+                int linkEnd = chatArea.getLength();
+                links.add(new HyperlinkInfo(linkStart, linkEnd, href));
+                return;  // skip the other-tag logic
+            }
+
+            // push any new classes for this tag
+            switch (tag) {
+                case "b", "strong":
+                    newStyles.add("bold");
+                    break;
+                case "i", "em":
+                    newStyles.add("italic");
+                    break;
+                case "u":
+                    newStyles.add("underline");
+                    break;
+                case "span":
+                    if (!el.className().isBlank()) {
+                        newStyles.addAll(Arrays.asList(el.className().split("\\s+")));
+                    }
+                    break;
+            }
+
+            // recurse children with the cloned list
+            for (org.jsoup.nodes.Node child : el.childNodes()) {
+                recurseAppend(child, newStyles);
+            }
+        }
+    }
+
     private Object getSelectedTreeItem() {
         TreeItem<Object> selectedItem = mumbleTree.getSelectionModel().getSelectedItem();
 
@@ -497,11 +722,18 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     private void sendMessage(String message) {
         Object selected = getSelectedTreeItem();
         if (selected instanceof MumbleUserFx user) {
+            // Whisper message to selected user
+            addMessage(String.format("To %s: %s", user.getUser().getUrl(), message));
             user.getUser().message(message);
         } else if (selected instanceof MumbleChannel channel) {
+            // Send message to everyone in selected channel
+            addMessage(String.format("To %s: %s", channel.getUrl(), message));
             channel.message(message);
         } else {
-            LOG.error("Attempted to send message to unsupported tree object: {}", selected);
+            // Send message to everyone in current channel
+            MumbleChannel channel = client.getSelf().getChannel();
+            addMessage(String.format("To %s: %s", channel.getUrl(), message));
+            channel.message(message);
         }
     }
 
