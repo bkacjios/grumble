@@ -18,7 +18,7 @@ public class MumbleTCPConnection implements Closeable {
 
     private final String hostname;
     private final int port;
-    private final Runnable onConnected;
+    private final Consumer<String> onConnected;
     private final BiConsumer<Integer, byte[]> onFrameReceived;
     private final Consumer<String> onDisconnected;
 
@@ -35,7 +35,7 @@ public class MumbleTCPConnection implements Closeable {
 
     public MumbleTCPConnection(String hostname,
                                int port,
-                               Runnable onConnected,
+                               Consumer<String> onConnected,
                                BiConsumer<Integer, byte[]> onFrameReceived,
                                Consumer<String> onDisconnected) {
         this.hostname = hostname;
@@ -157,7 +157,7 @@ public class MumbleTCPConnection implements Closeable {
                 case FINISHED, NOT_HANDSHAKING -> {
                     handshakeComplete = true;
                     key.interestOps(SelectionKey.OP_READ);
-                    onConnected.run();
+                    onConnected.accept(hostname);
                     return;
                 }
             }

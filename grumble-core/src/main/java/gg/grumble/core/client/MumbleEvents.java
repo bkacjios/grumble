@@ -9,7 +9,8 @@ public final class MumbleEvents {
 
     public interface MumbleEvent {}
 
-    public static class Connected implements MumbleEvent {}
+    public record Connected(String hostname) implements MumbleEvent {
+    }
 
     public record Disconnected(String reason) implements MumbleEvent {
     }

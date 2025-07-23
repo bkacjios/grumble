@@ -2,6 +2,8 @@ package gg.grumble.core.audio;
 
 import gg.grumble.core.audio.input.AudioInputDevice;
 import gg.grumble.core.audio.input.NullAudioInputDevice;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -10,6 +12,8 @@ import java.util.function.Consumer;
 import static gg.grumble.core.enums.MumbleAudioConfig.PLAYBACK_DURATION_MS;
 
 public class AudioInput {
+    private static final Logger LOG = LoggerFactory.getLogger(AudioInput.class);
+
     private Thread audioThread;
     private volatile boolean running;
     private long intervalNanos;
@@ -102,7 +106,11 @@ public class AudioInput {
             }
 
             // read microphone for the given interval and accept it
-            task.accept(audioDevice.read(getFrameDurationMillis()));
+            try {
+                task.accept(audioDevice.read(getFrameDurationMillis()));
+            } catch (Exception e) {
+                LOG.error("Error in audio input handler", e);
+            }
 
             nextTime += intervalNanos;
             // catch up if we're more than one interval behind

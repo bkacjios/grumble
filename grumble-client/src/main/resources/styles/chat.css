@@ -40,3 +40,14 @@
     -fx-fill: #27AE60;
     -fx-cursor: hand;
 }
+.chat-area .text.log-hostname {
+    -fx-font-weight: bold;
+    -fx-fill: #C70039;
+}
+.chat-area .text.table {
+    -fx-font-family: monospace;
+}
+
+.chat-area .text.cell {
+    -fx-padding: 0 4px;
+}

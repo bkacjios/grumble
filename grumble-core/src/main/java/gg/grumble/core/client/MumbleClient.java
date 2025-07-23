@@ -97,7 +97,7 @@ public class MumbleClient implements Closeable {
 
     private MumbleUser self;
 
-    private boolean transmitting = true;
+    private boolean transmitting = false;
     private boolean wasTransmitting = false;
 
     private boolean synced = false;
@@ -198,9 +198,9 @@ public class MumbleClient implements Closeable {
         }
     }
 
-    private void onConnectedTcp() {
+    private void onConnectedTcp(String hostname) {
         sendVersion();
-        fireEvent(new MumbleEvents.Connected());
+        fireEvent(new MumbleEvents.Connected(hostname));
     }
 
     private void onServerVersion(MumbleProto.Version version) {

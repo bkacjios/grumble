@@ -177,12 +177,19 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
         GlobalScreen.addNativeKeyListener(this);
 
-        client.connect("pi-two.lan");
-        addMessage("Connecting to server pi-two.lan");
+        String hostname = "pi-two.lan";
+
+        client.connect(hostname);
+        addMessage(String.format("Connecting to server <span class='log-hostname'>%s</span>", hostname));
 
         client.addEventListener(MumbleEvents.Connected.class, ignored -> {
             client.authenticate("Java-BOT");
             Platform.runLater(() -> addMessage("Connected."));
+        });
+        client.addEventListener(MumbleEvents.ServerReject.class, event -> {
+            String reason = event.reject().getReason();
+            LOG.warn("Rejected from server: {}", reason);
+            Platform.runLater(() -> addMessage(String.format("Rejected from server: <span class='log-hostname'>%s</span>", reason)));
         });
         client.addEventListener(MumbleEvents.Disconnected.class, event -> {
             LOG.warn("Disconnected from mumble server: {}", event.reason());
@@ -701,12 +708,35 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                         newStyles.addAll(Arrays.asList(el.className().split("\\s+")));
                     }
                     break;
+                case "p":
+                    // Add a newline before the paragraph unless it's the very start
+                    if (chatArea.getLength() > 0) {
+                        chatArea.appendText("\n");
+                    }
+                    break;
+                case "table":
+                    newStyles.add("table"); // optional: add table class
+                    break;
+                case "tr":
+                    if (chatArea.getLength() > 0) {
+                        chatArea.appendText("\n"); // new row
+                    }
+                    break;
+                case "td", "th":
+                    newStyles.add("cell"); // optional: style for table cell
+                    break;
             }
 
             // recurse children with the cloned list
             for (org.jsoup.nodes.Node child : el.childNodes()) {
                 recurseAppend(child, newStyles);
             }
+
+            // Add spacing after table cells
+            if ("td".equals(tag) || "th".equals(tag)) {
+                chatArea.appendText("\t");
+            }
+
         }
     }
 
