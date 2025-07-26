@@ -97,6 +97,8 @@ public class MumbleClient implements Closeable {
 
     private MumbleUser self;
 
+    private int transmitReleaseHold = 150;
+    private Timer transmitReleaseTimer;
     private boolean transmitting = false;
     private boolean wasTransmitting = false;
 
@@ -118,6 +120,10 @@ public class MumbleClient implements Closeable {
     private float udpPingAverage = 0;
     private float udpPingDeviation = 0;
 
+    private long serverMajor;
+    private long serverMinor;
+    private long serverPatch;
+
     public MumbleClient() {
         try {
             OpusLibrary.loadFromJar();
@@ -131,9 +137,15 @@ public class MumbleClient implements Closeable {
     }
 
     private void processUdpMessage(byte[] encrypted) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Received UDP packet: {}", toHex(encrypted));
+        }
         if (crypto.isInitialized()) {
             try {
                 byte[] decrypted = crypto.decrypt(encrypted);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Decrypted UDP packet: {}", toHex(decrypted));
+                }
                 onUdpTunnel(ByteBuffer.wrap(decrypted), true);
             } catch (MumbleOCB2.DecryptException e) {
                 LOG.warn("Unable to decrypt UDP packet: {}", e.getMessage());
@@ -209,16 +221,16 @@ public class MumbleClient implements Closeable {
         String release = version.getRelease();
         if (legacyConnection) {
             int v1 = version.getVersionV1();
-            int major = (v1 >> 16) & 0xFF;
-            int minor = (v1 >> 8) & 0xFF;
-            int patch = v1 & 0xFF;
-            LOG.info("Server Version v1: {}.{}.{} ({})", major, minor, patch, release);
+            serverMajor = (v1 >> 16) & 0xFF;
+            serverMinor = (v1 >> 8) & 0xFF;
+            serverPatch = v1 & 0xFF;
+            LOG.info("Server Version v1: {}.{}.{} ({})", serverMajor, serverMinor, serverPatch, release);
         } else {
             long v2 = version.getVersionV2();
-            long major = (v2 >> 48) & 0xFFFF;
-            long minor = (v2 >> 32) & 0xFFFF;
-            long patch = (v2 >> 16) & 0xFFFF;
-            LOG.info("Server Version v2: {}.{}.{} ({})", major, minor, patch, release);
+            serverMajor = (v2 >> 48) & 0xFFFF;
+            serverMinor = (v2 >> 32) & 0xFFFF;
+            serverPatch = (v2 >> 16) & 0xFFFF;
+            LOG.info("Server Version v2: {}.{}.{} ({})", serverMajor, serverMinor, serverPatch, release);
         }
 
         LOG.info("Server OS: {} ({})", version.getOs(), version.getOsVersion());
@@ -269,8 +281,9 @@ public class MumbleClient implements Closeable {
 
     /**
      * Update UDP ping statistics for the given timestamp.
+     *
      * @param timestamp The time this ping packet was sent.
-     * @param udp If this message came from our UDP connection.
+     * @param udp       If this message came from our UDP connection.
      * @return Ping time in milliseconds.
      */
     private float updateUdpPing(long timestamp, boolean udp) {
@@ -379,20 +392,11 @@ public class MumbleClient implements Closeable {
         audio.setOpusData(ByteString.copyFrom(encoded, 0, encodedLen));
         audio.setTarget(this.audioTarget);
 
-        byte[] protobufPayload = audio.build().toByteArray();
-
-        ByteBuffer packet = ByteBuffer.allocate(1 + 10 + protobufPayload.length);
-        packet.put(MumblePacketTypeProtobuf.AUDIO);
-        MumbleVarInt.writeVarInt(packet, protobufPayload.length);
-        packet.put(protobufPayload);
-        packet.flip();
+        ByteBuffer packet = wrapProtobufUdpPacket(MumblePacketTypeProtobuf.AUDIO, audio.build());
 
         if (this.tcpUdpTunnel) {
             send(packet);
         } else {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Sending UDP Protobuf Audio");
-            }
             sendUdp(packet);
         }
     }
@@ -400,15 +404,16 @@ public class MumbleClient implements Closeable {
     /**
      * Construct a legacy audio packet and send it.
      * Structure:
-     *  1 Byte message header
-     *      - Bits 0-4 Target ID (Max type value of 7)
-     *      - Bits 5-7 Legacy Packet type (Max target value of 31)
-     *  VarInt Audio sequence number
-     *  VarInt Audio header (Length is masked with 0x1FFF, 13th bit for terminator flag)
-     *  Encoded audio data
-     * @param encoded Encoded audio data
+     * 1 Byte message header
+     * - Bits 0-4 Target ID (Max type value of 7)
+     * - Bits 5-7 Legacy Packet type (Max target value of 31)
+     * VarInt Audio sequence number
+     * VarInt Audio header (Length is masked with 0x1FFF, 13th bit for terminator flag)
+     * Encoded audio data
+     *
+     * @param encoded    Encoded audio data
      * @param encodedLen Length of encoded audio data
-     * @param lastFrame If this is the final frame of audio
+     * @param lastFrame  If this is the final frame of audio
      */
     private void sendLegacyAudioPacket(byte[] encoded, int encodedLen, boolean lastFrame) {
         int header = encodedLen & 0x1FFF;
@@ -809,14 +814,19 @@ public class MumbleClient implements Closeable {
     }
 
     private void handleUdpProtobufPacket(ByteBuffer data, boolean udp) {
-        byte id = data.get();
+        byte typeId = data.get();
+        MumblePacketTypeProtobuf type = MumblePacketTypeProtobuf.fromId(typeId);
+
+        if (type == null) {
+            throw new IllegalStateException("Unhandled protobuf UDP packet type: " + typeId);
+        }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Received UDP protobuf packet: {}", id);
+            LOG.debug("Received UDP protobuf packet: {}", type.name());
         }
 
         try {
-            switch (id) {
+            switch (type) {
                 case MumblePacketTypeProtobuf.AUDIO: {
                     MumbleUDPProto.Audio audio = MumbleUDPProto.Audio.parseFrom(data);
                     handleProtobufAudio(audio);
@@ -827,11 +837,9 @@ public class MumbleClient implements Closeable {
                     onServerPongUdpProtobuf(ping, udp);
                     break;
                 }
-                default:
-                    throw new IllegalStateException("Tried to process unhandled protobuf UDP packet: " + id);
             }
         } catch (InvalidProtocolBufferException e) {
-            throw new RuntimeException("Unable to parse protobuf packet: " + id, e);
+            throw new RuntimeException("Unable to parse protobuf packet: " + type.name(), e);
         }
     }
 
@@ -886,9 +894,7 @@ public class MumbleClient implements Closeable {
 
                 executeDecoderSession(session, sequence, payload, transmitting);
             }
-            default -> {
-                throw new IllegalArgumentException("Unsupported codec: " + codec);
-            }
+            default -> throw new IllegalArgumentException("Unsupported codec: " + codec);
         }
     }
 
@@ -1049,7 +1055,7 @@ public class MumbleClient implements Closeable {
         }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Received {}: {}", protoName, toHex(message.toByteArray()));
+            LOG.debug("Handled TCP {}: {}", protoName, toHex(message.toByteArray()));
         }
     }
 
@@ -1106,6 +1112,7 @@ public class MumbleClient implements Closeable {
     /**
      * Send a TCP UDP_TUNNEL packet using a raw ByteBuffer.
      * Only used for connections to legacy servers.
+     *
      * @param message The UDP message we want to tunnel
      */
     private synchronized void send(ByteBuffer message) {
@@ -1116,7 +1123,7 @@ public class MumbleClient implements Closeable {
         ByteBuffer framed = frameMessage(MumbleMessageType.UDP_TUNNEL, data);
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Sending Legacy TCP {}: {}", MumbleMessageType.UDP_TUNNEL.name(), toHex(framed));
+            LOG.debug("Sending TCP {}: {}", MumbleMessageType.UDP_TUNNEL.name(), toHex(framed));
         }
 
         tcpConnection.send(framed);
@@ -1147,14 +1154,22 @@ public class MumbleClient implements Closeable {
         buffer.get(data);
         buffer.reset();
         if (LOG.isDebugEnabled()) {
-            byte type = (byte) ((data[0] >> 5) & 0x7);
-            LOG.debug("Sending UDP Legacy {} packet", MumblePacketTypeLegacy.fromId(type));
+            if (legacyConnection) {
+                byte type = (byte) ((data[0] >> 5) & 0x7);
+                LOG.debug("Sending UDP Legacy {}", MumblePacketTypeLegacy.fromId(type));
+            } else {
+                byte type = data[0];
+                LOG.debug("Sending UDP Protobuf {}", MumblePacketTypeProtobuf.fromId(type));
+            }
         }
         sendUdp(data);
     }
 
     private void sendUdp(byte[] data) {
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Sending UDP data: {}", toHex(data));
+            }
             udpConnection.send(crypto.encrypt(data));
             udpSendErrorAccumulator = 0;
         } catch (IOException e) {
@@ -1164,6 +1179,16 @@ public class MumbleClient implements Closeable {
             }
             LOG.error("Unable to send UDP packet", e);
         }
+    }
+
+    private ByteBuffer wrapProtobufUdpPacket(MumblePacketTypeProtobuf type, MessageLite message) {
+        byte[] payload = message.toByteArray();
+        ByteBuffer buffer = ByteBuffer.allocate(1 + 10 + payload.length);
+        buffer.put((byte) type.getId());
+        MumbleVarInt.writeVarInt(buffer, payload.length);
+        buffer.put(payload);
+        buffer.flip();
+        return buffer;
     }
 
     private static ByteBuffer frameMessage(MumbleMessageType type, byte[] protobufBytes) {
@@ -1208,7 +1233,7 @@ public class MumbleClient implements Closeable {
 
     private void pingTcp() {
         MumbleProto.Ping.Builder ping = MumbleProto.Ping.newBuilder();
-        ping.setTimestamp(System.nanoTime());
+        ping.setTimestamp(System.nanoTime() & 0x00FFFFFFFFFFFFFFL);
         ping.setGood(crypto.getGood());
         ping.setLate(crypto.getLate());
         ping.setLost(crypto.getLost());
@@ -1222,8 +1247,18 @@ public class MumbleClient implements Closeable {
         send(MumbleMessageType.PING, ping.build());
     }
 
+    private boolean isLegacyFloatPing() {
+        return legacyConnection && (serverMajor < 1 || (serverMajor == 1 && serverMinor < 4));
+    }
+
     private void pingUdp() {
-        if (legacyConnection) {
+        if (isLegacyFloatPing()) {
+            ByteBuffer packet = ByteBuffer.allocate(5);
+            packet.put((byte) (MumblePacketTypeLegacy.PING.getId() << 5));
+            packet.putFloat(System.nanoTime() / 1_000_000_000f);
+            packet.flip();
+            sendUdp(packet);
+        } else if (legacyConnection) {
             ByteBuffer packet = ByteBuffer.allocate(UDP_BUFFER_MAX);
             packet.put((byte) (MumblePacketTypeLegacy.PING.getId() << 5));
             MumbleVarInt.writeVarInt(packet, System.nanoTime());
@@ -1231,11 +1266,9 @@ public class MumbleClient implements Closeable {
             sendUdp(packet);
         } else {
             MumbleUDPProto.Ping.Builder ping = MumbleUDPProto.Ping.newBuilder();
-            ping.setTimestamp(System.nanoTime());
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Sending UDP Protobuf Ping");
-            }
-            sendUdp(ping.build().toByteArray());
+            ping.setTimestamp(System.nanoTime() & 0x00FFFFFFFFFFFFFFL);
+            ByteBuffer packet = wrapProtobufUdpPacket(MumblePacketTypeProtobuf.PING, ping.build());
+            sendUdp(packet);
         }
         if (udpPingAccumulator >= UDP_TCP_PING_FALLBACK && !tcpUdpTunnel) {
             // We didn't get a response from a ping 3 times in a row
@@ -1310,12 +1343,44 @@ public class MumbleClient implements Closeable {
         return this.self;
     }
 
+    public int getTransmitReleaseHold() {
+        return transmitReleaseHold;
+    }
+
+    public void setTransmitReleaseHold(int transmitReleaseHold) {
+        this.transmitReleaseHold = transmitReleaseHold;
+    }
+
     public boolean isTransmitting() {
         return transmitting;
     }
 
     public void setTransmitting(boolean transmitting) {
-        this.transmitting = transmitting;
+        if (transmitting) {
+            // Cancel any pending timer if we're turning back on
+            if (transmitReleaseTimer != null) {
+                transmitReleaseTimer.cancel();
+                transmitReleaseTimer = null;
+            }
+            this.transmitting = true;
+        } else if (transmitReleaseHold > 0) {
+            // Restart the timer
+            if (transmitReleaseTimer != null) {
+                transmitReleaseTimer.cancel();
+            }
+
+            transmitReleaseTimer = new Timer("TransmitReleaseTimer", true);
+            transmitReleaseTimer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    MumbleClient.this.transmitting = false;
+                    transmitReleaseTimer = null;
+                }
+            }, transmitReleaseHold);
+
+        } else {
+            this.transmitting = false;
+        }
     }
 
     @Override

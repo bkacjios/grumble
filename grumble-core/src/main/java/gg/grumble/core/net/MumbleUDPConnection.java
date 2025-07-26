@@ -40,7 +40,7 @@ public class MumbleUDPConnection implements Closeable {
             this.channel = DatagramChannel.open();
             this.channel.configureBlocking(false);
             this.channel.setOption(StandardSocketOptions.SO_RCVBUF, 512 * 1024);
-            this.channel.bind(new InetSocketAddress("0.0.0.0", 0));
+            this.channel.bind(new InetSocketAddress(0));
 
             this.selector = Selector.open();
             this.channel.register(selector, SelectionKey.OP_READ);
