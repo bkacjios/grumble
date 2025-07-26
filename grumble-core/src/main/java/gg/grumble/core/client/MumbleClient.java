@@ -342,11 +342,6 @@ public class MumbleClient implements Closeable {
             fireEvent(new MumbleEvents.UserStartSpeaking(self));
         }
 
-        if (wasTransmitting && !transmitting) {
-            self.setSpeaking(false);
-            fireEvent(new MumbleEvents.UserStopSpeaking(self));
-        }
-
         // Send audio if transmitting or it's the last frame
         if (transmitting || wasTransmitting) {
             // Convert to shorts
@@ -364,26 +359,41 @@ public class MumbleClient implements Closeable {
             if (legacyConnection) {
                 sendLegacyAudioPacket(encoded, encodedLen, lastFrame);
             } else {
-                sendProtobufAudioPacket(encoded, lastFrame);
+                sendProtobufAudioPacket(encoded, encodedLen, lastFrame);
             }
+        }
+
+        if (wasTransmitting && !transmitting) {
+            self.setSpeaking(false);
+            fireEvent(new MumbleEvents.UserStopSpeaking(self));
+            audioSequence = 0;
         }
 
         wasTransmitting = transmitting;
     }
 
-    private void sendProtobufAudioPacket(byte[] encoded, boolean lastFrame) {
+    private void sendProtobufAudioPacket(byte[] encoded, int encodedLen, boolean lastFrame) {
         MumbleUDPProto.Audio.Builder audio = MumbleUDPProto.Audio.newBuilder();
         audio.setFrameNumber(audioSequence++);
         audio.setIsTerminator(lastFrame);
+        audio.setOpusData(ByteString.copyFrom(encoded, 0, encodedLen));
         audio.setTarget(this.audioTarget);
-        audio.setOpusData(ByteString.copyFrom(encoded));
+
+        byte[] protobufPayload = audio.build().toByteArray();
+
+        ByteBuffer packet = ByteBuffer.allocate(1 + 10 + protobufPayload.length);
+        packet.put(MumblePacketTypeProtobuf.AUDIO);
+        MumbleVarInt.writeVarInt(packet, protobufPayload.length);
+        packet.put(protobufPayload);
+        packet.flip();
+
         if (this.tcpUdpTunnel) {
-            send(MumbleMessageType.UDP_TUNNEL, audio.build());
+            send(packet);
         } else {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Sending UDP Protobuf Audio");
             }
-            sendUdp(audio.build().toByteArray());
+            sendUdp(packet);
         }
     }
 
@@ -748,8 +758,13 @@ public class MumbleClient implements Closeable {
         }
 
         try {
-            if (legacyConnection && messageType.equals(MumbleMessageType.UDP_TUNNEL)) {
-                handleUdpLegacyPacket(ByteBuffer.wrap(payload), false);
+            if (messageType.equals(MumbleMessageType.UDP_TUNNEL)) {
+                ByteBuffer buffer = ByteBuffer.wrap(payload);
+                if (legacyConnection) {
+                    handleUdpLegacyPacket(buffer, false);
+                } else {
+                    handleUdpProtobufPacket(buffer, false);
+                }
             } else {
                 // Use protobuf parser for the message type
                 MessageLite message = parseProtobufMessage(messageType, payload);
@@ -1161,15 +1176,23 @@ public class MumbleClient implements Closeable {
         return buffer;
     }
 
-    public void authenticate(String username, String... tokens) {
-        authenticate(username, null, tokens);
+    public void authenticate(String username) {
+        authenticate(username, Collections.emptyList());
     }
 
-    public void authenticate(String username, String password, String... tokens) {
+    public void authenticate(String username, List<String> tokens) {
+        authenticate(username, null, MumbleClientType.NORMAL, tokens);
+    }
+
+    public void authenticate(String username, String password) {
+        authenticate(username, password, MumbleClientType.NORMAL, Collections.emptyList());
+    }
+
+    public void authenticate(String username, String password, List<String> tokens) {
         authenticate(username, password, MumbleClientType.NORMAL, tokens);
     }
 
-    public void authenticate(String username, String password, MumbleClientType type, String... tokens) {
+    public void authenticate(String username, String password, MumbleClientType type, List<String> tokens) {
         MumbleProto.Authenticate.Builder auth = MumbleProto.Authenticate.newBuilder();
         auth.setUsername(username);
         if (password != null) {
@@ -1177,7 +1200,9 @@ public class MumbleClient implements Closeable {
         }
         auth.setClientType(type.getTypeId());
         auth.setOpus(true);
-        auth.addAllTokens(List.of(tokens));
+        if (tokens != null) {
+            auth.addAllTokens(tokens);
+        }
         send(MumbleMessageType.AUTHENTICATE, auth.build());
     }
 

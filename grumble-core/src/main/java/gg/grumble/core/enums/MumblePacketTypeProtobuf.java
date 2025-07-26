@@ -1,6 +1,6 @@
 package gg.grumble.core.enums;
 
 public class MumblePacketTypeProtobuf {
-    public static final int AUDIO = 0;
-    public static final int PING = 1;
+    public static final byte AUDIO = 0;
+    public static final byte PING = 1;
 }
