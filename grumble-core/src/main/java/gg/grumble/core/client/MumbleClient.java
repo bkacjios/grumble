@@ -120,10 +120,6 @@ public class MumbleClient implements Closeable {
     private float udpPingAverage = 0;
     private float udpPingDeviation = 0;
 
-    private long serverMajor;
-    private long serverMinor;
-    private long serverPatch;
-
     public MumbleClient() {
         try {
             OpusLibrary.loadFromJar();
@@ -221,16 +217,16 @@ public class MumbleClient implements Closeable {
         String release = version.getRelease();
         if (legacyConnection) {
             int v1 = version.getVersionV1();
-            serverMajor = (v1 >> 16) & 0xFF;
-            serverMinor = (v1 >> 8) & 0xFF;
-            serverPatch = v1 & 0xFF;
-            LOG.info("Server Version v1: {}.{}.{} ({})", serverMajor, serverMinor, serverPatch, release);
+            int major = (v1 >> 16) & 0xFF;
+            int minor = (v1 >> 8) & 0xFF;
+            int patch = v1 & 0xFF;
+            LOG.info("Server Version v1: {}.{}.{} ({})", major, minor, patch, release);
         } else {
             long v2 = version.getVersionV2();
-            serverMajor = (v2 >> 48) & 0xFFFF;
-            serverMinor = (v2 >> 32) & 0xFFFF;
-            serverPatch = (v2 >> 16) & 0xFFFF;
-            LOG.info("Server Version v2: {}.{}.{} ({})", serverMajor, serverMinor, serverPatch, release);
+            long major = (v2 >> 48) & 0xFFFF;
+            long minor = (v2 >> 32) & 0xFFFF;
+            long patch = (v2 >> 16) & 0xFFFF;
+            LOG.info("Server Version v2: {}.{}.{} ({})", major, minor, patch, release);
         }
 
         LOG.info("Server OS: {} ({})", version.getOs(), version.getOsVersion());
@@ -392,12 +388,18 @@ public class MumbleClient implements Closeable {
         audio.setOpusData(ByteString.copyFrom(encoded, 0, encodedLen));
         audio.setTarget(this.audioTarget);
 
-        ByteBuffer packet = wrapProtobufUdpPacket(MumblePacketTypeProtobuf.AUDIO, audio.build());
+        byte[] payload = audio.build().toByteArray();
+
+        ByteBuffer buffer = ByteBuffer.allocate(1 + 10 + payload.length);
+        buffer.put((byte) MumblePacketTypeProtobuf.AUDIO.getId());
+        MumbleVarInt.writeVarInt(buffer, payload.length);
+        buffer.put(payload);
+        buffer.flip();
 
         if (this.tcpUdpTunnel) {
-            send(packet);
+            send(buffer);
         } else {
-            sendUdp(packet);
+            sendUdp(buffer);
         }
     }
 
@@ -1181,16 +1183,6 @@ public class MumbleClient implements Closeable {
         }
     }
 
-    private ByteBuffer wrapProtobufUdpPacket(MumblePacketTypeProtobuf type, MessageLite message) {
-        byte[] payload = message.toByteArray();
-        ByteBuffer buffer = ByteBuffer.allocate(1 + 10 + payload.length);
-        buffer.put((byte) type.getId());
-        MumbleVarInt.writeVarInt(buffer, payload.length);
-        buffer.put(payload);
-        buffer.flip();
-        return buffer;
-    }
-
     private static ByteBuffer frameMessage(MumbleMessageType type, byte[] protobufBytes) {
         ByteBuffer buffer = ByteBuffer.allocate(2 + 4 + protobufBytes.length);
         buffer.order(ByteOrder.BIG_ENDIAN);
@@ -1247,18 +1239,8 @@ public class MumbleClient implements Closeable {
         send(MumbleMessageType.PING, ping.build());
     }
 
-    private boolean isLegacyFloatPing() {
-        return legacyConnection && (serverMajor < 1 || (serverMajor == 1 && serverMinor < 4));
-    }
-
     private void pingUdp() {
-        if (isLegacyFloatPing()) {
-            ByteBuffer packet = ByteBuffer.allocate(5);
-            packet.put((byte) (MumblePacketTypeLegacy.PING.getId() << 5));
-            packet.putFloat(System.nanoTime() / 1_000_000_000f);
-            packet.flip();
-            sendUdp(packet);
-        } else if (legacyConnection) {
+        if (legacyConnection) {
             ByteBuffer packet = ByteBuffer.allocate(UDP_BUFFER_MAX);
             packet.put((byte) (MumblePacketTypeLegacy.PING.getId() << 5));
             MumbleVarInt.writeVarInt(packet, System.nanoTime());
@@ -1267,7 +1249,13 @@ public class MumbleClient implements Closeable {
         } else {
             MumbleUDPProto.Ping.Builder ping = MumbleUDPProto.Ping.newBuilder();
             ping.setTimestamp(System.nanoTime() & 0x00FFFFFFFFFFFFFFL);
-            ByteBuffer packet = wrapProtobufUdpPacket(MumblePacketTypeProtobuf.PING, ping.build());
+
+            byte[] payload = ping.build().toByteArray();
+
+            ByteBuffer packet = ByteBuffer.allocate(1 + payload.length);
+            packet.put((byte) MumblePacketTypeProtobuf.PING.getId());
+            packet.put(payload);
+            packet.flip();
             sendUdp(packet);
         }
         if (udpPingAccumulator >= UDP_TCP_PING_FALLBACK && !tcpUdpTunnel) {
