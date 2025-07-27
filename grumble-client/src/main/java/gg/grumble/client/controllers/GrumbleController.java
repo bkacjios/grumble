@@ -6,8 +6,8 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent;
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
+import gg.grumble.client.services.LanguageService;
 import gg.grumble.client.utils.Closeable;
-import gg.grumble.client.utils.ExceptionHandler;
 import gg.grumble.client.utils.WindowIcon;
 import gg.grumble.core.audio.input.TargetDataLineInputDevice;
 import gg.grumble.core.audio.output.SourceDataLineOutputDevice;
@@ -76,10 +76,10 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     @FXML
     public TextArea chatMessage;
 
+    private final MumbleClient client;
+    private final LanguageService lang;
     private final FxmlLoaderService fxmlLoaderService;
     private final HostServices hostServices;
-
-    private final MumbleClient client = new MumbleClient();
 
     private final Map<MumbleChannel, TreeItem<Object>> channelNodeMap = new HashMap<>();
     private final Map<MumbleUser, MumbleUserFx> userFxMap = new HashMap<>();
@@ -98,7 +98,10 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     private Image userServerDeafIcon;
     private Image userAuthenticatedIcon;
 
-    public GrumbleController(FxmlLoaderService fxmlLoaderService, HostServices hostServices) throws LineUnavailableException {
+    public GrumbleController(MumbleClient client, LanguageService lang, FxmlLoaderService fxmlLoaderService,
+                             HostServices hostServices) throws LineUnavailableException {
+        this.client = client;
+        this.lang = lang;
         this.fxmlLoaderService = fxmlLoaderService;
         this.hostServices = hostServices;
 
@@ -180,16 +183,16 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         String hostname = "pi-two.lan";
 
         client.connect(hostname);
-        addMessage(String.format("Connecting to server <span class='log-hostname'>%s</span>", hostname));
+        addMessage(lang.t("mumble.event.connecting", String.format("<span class='log-hostname'>%s</span>", hostname)));
 
         client.addEventListener(MumbleEvents.Connected.class, ignored -> {
             client.authenticate("Java-BOT");
-            Platform.runLater(() -> addMessage("Connected."));
+            Platform.runLater(() -> addMessage(lang.t("mumble.event.connected")));
         });
         client.addEventListener(MumbleEvents.ServerReject.class, event -> {
             String reason = event.reject().getReason();
             LOG.warn("Rejected from server: {}", reason);
-            Platform.runLater(() -> addMessage(String.format("Rejected from server: <span class='log-hostname'>%s</span>", reason)));
+            Platform.runLater(() -> addMessage(lang.t("mumble.event.rejected", String.format("<span class='log-hostname'>%s</span>", reason))));
         });
         client.addEventListener(MumbleEvents.Disconnected.class, event -> {
             LOG.warn("Disconnected from mumble server: {}", event.reason());
@@ -198,14 +201,14 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
             userNodeMap.clear();
             Platform.runLater(() -> {
                 mumbleTree.setRoot(null);
-                addMessage("Disconnected from server.");
+                addMessage(lang.t("mumble.event.disconnected"));
             });
         });
         client.addEventListener(MumbleEvents.ServerSync.class, event -> {
             TreeItem<Object> rootItem = buildTree(client.getChannel(0));
             rootItem.setExpanded(true);
             Platform.runLater(() -> {
-                addMessage("Welcome message: " + event.sync().getWelcomeText());
+                addMessage(lang.t("mumble.event.welcome", event.sync().getWelcomeText()));
                 mumbleTree.setRoot(rootItem);
                 mumbleTree.setShowRoot(true);
             });
@@ -246,11 +249,11 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 removeUserFromChannel(user, event.from());
                 addUserToChannel(user, event.to());
                 if (user == client.getSelf()) {
-                    addMessage(String.format("You joined %s.", event.to().getUrl()));
+                    addMessage(lang.t("mumble.event.channel.joined", event.to().getUrl()));
                 } else if (client.getSelf().getChannel() == event.to()) {
-                    addMessage(String.format("%s entered channel.", event.user().getUrl()));
+                    addMessage(lang.t("mumble.event.channel.entered", event.user().getUrl()));
                 } else {
-                    addMessage(String.format("%s moved to %s.", event.user().getUrl(), event.to().getUrl()));
+                    addMessage(lang.t("mumble.event.channel.moved", event.user().getUrl(), event.to().getUrl()));
                 }
             });
         });
@@ -519,7 +522,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         chatArea.setEditable(false);
         chatArea.setWrapText(true);
 
-        addMessage("Welcome to Mumble.");
+        addMessage(lang.t("mumble.event.initialize"));
 
         chatArea.setOnMouseClicked(evt -> {
             var hit = chatArea.hit(evt.getX(), evt.getY());
