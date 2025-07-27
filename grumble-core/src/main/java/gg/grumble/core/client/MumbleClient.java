@@ -111,6 +111,7 @@ public class MumbleClient implements Closeable {
     private boolean tcpUdpTunnel = true;
     private int udpPingAccumulator = 0;
     private int udpSendErrorAccumulator = 0;
+    private boolean tcpActive = true;
 
     private int tcpPingPackets = 0;
     private float tcpPingAverage = 0;
@@ -142,7 +143,7 @@ public class MumbleClient implements Closeable {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Decrypted UDP packet: {}", toHex(decrypted));
                 }
-                onUdpTunnel(ByteBuffer.wrap(decrypted), true);
+                onUdpTunnel(ByteBuffer.wrap(decrypted));
             } catch (MumbleOCB2.DecryptException e) {
                 LOG.warn("Unable to decrypt UDP packet: {}", e.getMessage());
             }
@@ -248,6 +249,7 @@ public class MumbleClient implements Closeable {
         float n = ++tcpPingPackets;
         tcpPingAverage += (delay - tcpPingAverage) / n;
         tcpPingDeviation = (float) Math.pow(Math.abs(delay - tcpPingAverage), 2);
+        tcpActive = true;
 
         fireEvent(new MumbleEvents.ServerPongTcp(ping));
     }
@@ -397,7 +399,7 @@ public class MumbleClient implements Closeable {
         buffer.flip();
 
         if (this.tcpUdpTunnel) {
-            send(buffer);
+            sendUdpTunnel(buffer);
         } else {
             sendUdp(buffer);
         }
@@ -430,7 +432,7 @@ public class MumbleClient implements Closeable {
         packet.put(encoded, 0, encodedLen);
         packet.flip();
         if (this.tcpUdpTunnel) {
-            send(packet);
+            sendUdpTunnel(packet);
         } else {
             sendUdp(packet);
         }
@@ -690,7 +692,7 @@ public class MumbleClient implements Closeable {
         } else {
             MumbleProto.CryptSetup.Builder crypt = MumbleProto.CryptSetup.newBuilder();
             crypt.setClientNonce(ByteString.copyFrom(crypto.getEncryptIV()));
-            send(MumbleMessageType.CRYPT_SETUP, crypt.build());
+            sendTcp(MumbleMessageType.CRYPT_SETUP, crypt.build());
             LOG.warn("Cipher disagreement: Renegotiating with server!");
         }
 
@@ -784,11 +786,11 @@ public class MumbleClient implements Closeable {
         }
     }
 
-    private void onUdpTunnel(ByteBuffer data, boolean udp) {
+    private void onUdpTunnel(ByteBuffer data) {
         if (legacyConnection) {
-            handleUdpLegacyPacket(data, udp);
+            handleUdpLegacyPacket(data, true);
         } else {
-            handleUdpProtobufPacket(data, udp);
+            handleUdpProtobufPacket(data, true);
         }
     }
 
@@ -930,15 +932,17 @@ public class MumbleClient implements Closeable {
     }
 
     private void handleMessage(MumbleMessageType messageType, MessageLite message) {
+        String protoName;
+        if (message instanceof Message) {
+            Descriptors.Descriptor descriptor = ((Message) message).getDescriptorForType();
+            protoName = descriptor.getName();
+        } else {
+            protoName = message.getClass().getSimpleName();
+        }
         switch (messageType) {
             case VERSION -> {
                 if (message instanceof MumbleProto.Version version) {
                     onServerVersion(version);
-                }
-            }
-            case UDP_TUNNEL -> {
-                if (message instanceof MumbleProto.UDPTunnel tunnel) {
-                    onUdpTunnel(tunnel.getPacket().asReadOnlyByteBuffer(), false);
                 }
             }
             case PING -> {
@@ -1046,16 +1050,8 @@ public class MumbleClient implements Closeable {
                     onPluginDataTransmission(pluginDataTransmission);
                 }
             }
+            default -> throw new IllegalStateException("Unable to handle message type: " + protoName);
         }
-
-        String protoName;
-        if (message instanceof Message) {
-            Descriptors.Descriptor descriptor = ((Message) message).getDescriptorForType();
-            protoName = descriptor.getName();
-        } else {
-            protoName = message.getClass().getSimpleName();
-        }
-
         if (LOG.isDebugEnabled()) {
             LOG.debug("Handled TCP {}: {}", protoName, toHex(message.toByteArray()));
         }
@@ -1117,36 +1113,27 @@ public class MumbleClient implements Closeable {
      *
      * @param message The UDP message we want to tunnel
      */
-    private synchronized void send(ByteBuffer message) {
+    private synchronized void sendUdpTunnel(ByteBuffer message) {
         byte[] data = new byte[message.remaining()];
         message.mark();
         message.get(data);
         message.reset();
-        ByteBuffer framed = frameMessage(MumbleMessageType.UDP_TUNNEL, data);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Sending TCP {}: {}", MumbleMessageType.UDP_TUNNEL.name(), toHex(framed));
-        }
-
-        tcpConnection.send(framed);
+        sendFramed(MumbleMessageType.UDP_TUNNEL, data, MumbleMessageType.UDP_TUNNEL.name());
     }
 
-    public synchronized void send(MumbleMessageType type, MessageLite message) {
+    public synchronized void sendTcp(MumbleMessageType type, MessageLite message) {
         byte[] protobufBytes = message.toByteArray();
-        ByteBuffer framed = frameMessage(type, protobufBytes);
+        String messageType = (message instanceof Message)
+                ? ((Message) message).getDescriptorForType().getName()
+                : message.getClass().getSimpleName();
+        sendFramed(type, protobufBytes, messageType);
+    }
 
-        String protoName;
-        if (message instanceof Message) {
-            Descriptors.Descriptor descriptor = ((Message) message).getDescriptorForType();
-            protoName = descriptor.getName();
-        } else {
-            protoName = message.getClass().getSimpleName();
-        }
-
+    public synchronized void sendFramed(MumbleMessageType type, byte[] data, String messageType) {
+        ByteBuffer framed = frameMessage(type, data);
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Sending TCP {}: {}", protoName, toHex(framed));
+            LOG.debug("Sending TCP {}: {}", messageType, toHex(framed));
         }
-
         tcpConnection.send(framed);
     }
 
@@ -1220,10 +1207,15 @@ public class MumbleClient implements Closeable {
         if (tokens != null) {
             auth.addAllTokens(tokens);
         }
-        send(MumbleMessageType.AUTHENTICATE, auth.build());
+        sendTcp(MumbleMessageType.AUTHENTICATE, auth.build());
     }
 
     private void pingTcp() {
+        if (!tcpActive) {
+            LOG.warn("Server is unresponsive, disconnected");
+            close();
+            return;
+        }
         MumbleProto.Ping.Builder ping = MumbleProto.Ping.newBuilder();
         ping.setTimestamp(System.nanoTime() & 0x00FFFFFFFFFFFFFFL);
         ping.setGood(crypto.getGood());
@@ -1236,7 +1228,8 @@ public class MumbleClient implements Closeable {
         ping.setUdpPackets(udpPingPackets);
         ping.setUdpPingAvg(udpPingAverage);
         ping.setUdpPingVar(udpPingDeviation);
-        send(MumbleMessageType.PING, ping.build());
+        sendTcp(MumbleMessageType.PING, ping.build());
+        tcpActive = false;
     }
 
     private void pingUdp() {
@@ -1274,7 +1267,7 @@ public class MumbleClient implements Closeable {
         version.setRelease("Grumble 1.0");
         version.setVersionV1(MUMBLE_VERSION_v1);
         version.setVersionV2(MUMBLE_VERSION_V2);
-        send(MumbleMessageType.VERSION, version.build());
+        sendTcp(MumbleMessageType.VERSION, version.build());
     }
 
     public List<MumbleUser> getUsers() {

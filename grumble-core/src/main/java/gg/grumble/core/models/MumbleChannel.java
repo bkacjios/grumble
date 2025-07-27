@@ -127,7 +127,7 @@ public class MumbleChannel {
 		} else {
 			textMessage.addChannelId((int) this.channelId);
 		}
-		client.send(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
+		client.sendTcp(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
 	}
 
 	public void createChannel(String name) {
@@ -154,7 +154,7 @@ public class MumbleChannel {
 		channel.setPosition(position);
 		channel.setMaxUsers((int) maxUsers);
 		channel.setTemporary(temporary);
-		client.send(MumbleMessageType.CHANNEL_STATE, channel.build());
+		client.sendTcp(MumbleMessageType.CHANNEL_STATE, channel.build());
 	}
 
 	@SuppressWarnings("unused")

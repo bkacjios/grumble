@@ -291,42 +291,42 @@ public class MumbleUser {
         MumbleProto.UserState.Builder user = MumbleProto.UserState.newBuilder();
         user.setSession((int) session);
         user.setChannelId((int) channel.getChannelId());
-        client.send(MumbleMessageType.USER_STATE, user.build());
+        client.sendTcp(MumbleMessageType.USER_STATE, user.build());
     }
 
     public void message(String message) {
         MumbleProto.TextMessage.Builder textMessage = MumbleProto.TextMessage.newBuilder();
         textMessage.setMessage(message);
         textMessage.addSession((int) this.session);
-        client.send(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
+        client.sendTcp(MumbleMessageType.TEXT_MESSAGE, textMessage.build());
     }
 
     public void setMute(boolean mute) {
         MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
         state.setSession((int) this.session);
         state.setMute(mute);
-        client.send(MumbleMessageType.USER_STATE, state.build());
+        client.sendTcp(MumbleMessageType.USER_STATE, state.build());
     }
 
     public void setDeaf(boolean deaf) {
         MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
         state.setSession((int) this.session);
         state.setDeaf(deaf);
-        client.send(MumbleMessageType.USER_STATE, state.build());
+        client.sendTcp(MumbleMessageType.USER_STATE, state.build());
     }
 
     public void setSelfMute(boolean mute) {
         MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
         state.setSession((int) this.session);
         state.setSelfMute(mute);
-        client.send(MumbleMessageType.USER_STATE, state.build());
+        client.sendTcp(MumbleMessageType.USER_STATE, state.build());
     }
 
     public void setSelfDeaf(boolean deaf) {
         MumbleProto.UserState.Builder state = MumbleProto.UserState.newBuilder();
         state.setSession((int) this.session);
         state.setSelfDeaf(deaf);
-        client.send(MumbleMessageType.USER_STATE, state.build());
+        client.sendTcp(MumbleMessageType.USER_STATE, state.build());
     }
 
     public void requestStats() {
@@ -337,7 +337,7 @@ public class MumbleUser {
         MumbleProto.UserStats.Builder stats = MumbleProto.UserStats.newBuilder();
         stats.setSession((int) this.session);
         stats.setStatsOnly(statsOnly);
-        client.send(MumbleMessageType.USER_STATS, stats.build());
+        client.sendTcp(MumbleMessageType.USER_STATS, stats.build());
     }
 
     public boolean isAutoGainEnabled() {
