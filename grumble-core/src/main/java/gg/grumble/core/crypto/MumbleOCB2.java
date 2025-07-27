@@ -44,8 +44,6 @@ public class MumbleOCB2 {
         System.arraycopy(clientNonce, 0, encryptIV, 0, BLOCK_SIZE);
         System.arraycopy(serverNonce, 0, decryptIV, 0, BLOCK_SIZE);
 
-        decryptIV[0] = (byte) ((decryptIV[0] - 1) & 0xFF);
-
         Arrays.fill(decryptHistory, (short) -1);
         initialized = true;
         return true;
