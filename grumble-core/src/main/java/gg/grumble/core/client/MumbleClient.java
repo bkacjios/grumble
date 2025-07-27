@@ -921,6 +921,7 @@ public class MumbleClient implements Closeable {
         synchronized (decoder) {
             frameSize = decoder.getNbSamples(payload);
             pcm = new float[frameSize * CHANNELS];
+            Arrays.fill(pcm, 0f);
             decodedSamples = decoder.decodeFloat(payload, pcm, frameSize);
         }
 

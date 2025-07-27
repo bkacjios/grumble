@@ -49,6 +49,9 @@ public class MumbleUser {
     private int plcCount = 0;
     private static final byte[] EMPTY_BYTES = new byte[0];
 
+    private static final int JITTER_PREFILL_FRAMES = 2;
+    private boolean jitterReady = false;
+
     private boolean autoGainEnabled = false;
     private float manualGain = 1.0f;
 
@@ -220,18 +223,42 @@ public class MumbleUser {
     public int popPcmAudio(float[] out, int maxSamples) {
         synchronized (jitterBuffer) {
             int filled = 0;
+            long nextSeq = lastPlayedSequence + 1;
 
-            // Pull as many in‐order frames as needed to fill maxSamples
+            if (!jitterReady) {
+                int available = 0;
+                long seq = nextSeq;
+                while (jitterBuffer.containsKey(seq++) && available < JITTER_PREFILL_FRAMES) {
+                    available++;
+                }
+                if (available >= JITTER_PREFILL_FRAMES) {
+                    jitterReady = true;
+                } else {
+                    Arrays.fill(out, 0, maxSamples, 0f);
+                    return 0;
+                }
+            }
+
+            // Pull as many in-order frames as needed to fill maxSamples
             while (filled < maxSamples) {
-                long nextSeq = lastPlayedSequence + 1;
                 float[] frame = jitterBuffer.remove(nextSeq);
                 if (frame == null) break;
 
-                int toCopy = Math.min(frame.length, maxSamples - filled);
+                int frameLen = frame.length;
+                int toCopy = Math.min(frameLen, maxSamples - filled);
+
                 System.arraycopy(frame, 0, out, filled, toCopy);
                 filled += toCopy;
 
+                if (toCopy < frameLen) {
+                    float[] leftover = new float[frameLen - toCopy];
+                    System.arraycopy(frame, toCopy, leftover, 0, leftover.length);
+                    jitterBuffer.put(nextSeq, leftover);
+                    break; // keep same nextSeq on next tick
+                }
+
                 lastPlayedSequence = nextSeq;
+                nextSeq++;
                 plcCount = 0;
             }
 
@@ -241,8 +268,7 @@ public class MumbleUser {
                 return maxSamples;
             }
 
-            // No queued frames → try PLC / resync / silence
-            long nextSeq = lastPlayedSequence + 1;
+            // No queued frames, try PLC / resync / silence
             Map.Entry<Long, float[]> upcoming = jitterBuffer.firstEntry();
             if (upcoming != null) {
                 long futureSeq = upcoming.getKey();

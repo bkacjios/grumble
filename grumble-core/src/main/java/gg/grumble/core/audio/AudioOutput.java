@@ -2,6 +2,8 @@ package gg.grumble.core.audio;
 
 import gg.grumble.core.audio.output.AudioOutputDevice;
 import gg.grumble.core.audio.output.NullAudioOutputDevice;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -14,6 +16,8 @@ import static gg.grumble.core.enums.MumbleAudioConfig.PLAYBACK_DURATION_MS;
  * Allows hot-swapping the AudioOutput on the audio thread without restarting the thread.
  */
 public class AudioOutput {
+    private static final Logger LOG = LoggerFactory.getLogger(AudioOutput.class);
+
     private Thread audioThread;
     private volatile boolean running;
     private final long intervalNanos;
@@ -39,7 +43,7 @@ public class AudioOutput {
     public synchronized void start() {
         if (running) return;
         running = true;
-        audioThread = new Thread(this::runLoop, "output");
+        audioThread = new Thread(this::runLoop, "audio");
         audioThread.setDaemon(true);
         audioThread.setPriority(Thread.MAX_PRIORITY);
         audioThread.start();
@@ -104,10 +108,13 @@ public class AudioOutput {
             // perform mixing and playback
             task.run();
 
-            nextTime += intervalNanos;
-            // catch up if we're more than one interval behind
-            if (System.nanoTime() - nextTime > intervalNanos) {
-                nextTime = System.nanoTime();
+            long actualNow = System.nanoTime();
+            long drift = actualNow - nextTime;
+            if (Math.abs(drift) > intervalNanos) {
+                LOG.warn("AudioOutput drift: {} us", drift / 1000);
+                nextTime = actualNow; // hard reset on large drift
+            } else {
+                nextTime += intervalNanos;
             }
         }
 

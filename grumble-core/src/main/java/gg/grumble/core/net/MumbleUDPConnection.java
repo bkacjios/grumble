@@ -44,6 +44,9 @@ public class MumbleUDPConnection implements Closeable {
 
             this.selector = Selector.open();
             this.channel.register(selector, SelectionKey.OP_READ);
+
+            // Set DSCP EF (0xB8 = DSCP 46 << 2)
+            this.channel.socket().setTrafficClass(0xB8);
         } catch (IOException e) {
             throw new RuntimeException("Unable to initialize UDP connection", e);
         }
