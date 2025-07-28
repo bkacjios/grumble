@@ -110,7 +110,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
         client.setAudioOutput(new SourceDataLineOutputDevice());
         client.setAudioInput(new TargetDataLineInputDevice());
-        client.setVolume(1.0f);
+        client.setVolume(0.05f);
     }
 
     private void loadIcons() {
@@ -216,7 +216,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 mumbleTree.setShowRoot(true);
             });
         });
-        client.addEventListener(MumbleEvents.UserAdd.class, event -> {
+        client.addEventListener(MumbleEvents.UserConnected.class, event -> {
             Platform.runLater(() -> {
                 addUserToChannel(event.user(), event.user().getChannel());
                 if (event.user().getChannel() == client.getSelf().getChannel()) {
@@ -226,7 +226,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 }
             });
         });
-        client.addEventListener(MumbleEvents.UserRemove.class, event -> {
+        client.addEventListener(MumbleEvents.UserDisconnected.class, event -> {
             Platform.runLater(() -> {
                 removeUserFromChannel(event.user(), event.user().getChannel());
                 if (event.user().getChannel() == client.getSelf().getChannel()) {
@@ -631,7 +631,6 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
     private void addMessage(String message) {
         if (message == null || message.isEmpty()) return;
-        LOG.info(linkService.cleanHtml(message));
 
         // timestamp
         String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));

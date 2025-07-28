@@ -610,7 +610,7 @@ public class MumbleClient implements Closeable {
     private void onUserRemove(MumbleProto.UserRemove userRemove) {
         MumbleUser user = users.remove(Integer.toUnsignedLong(userRemove.getSession()));
 
-        fireEvent(new MumbleEvents.UserRemove(user, userRemove));
+        fireEvent(new MumbleEvents.UserDisconnected(user, userRemove));
 
         removeUserFromChannel(user);
         opusDecoders.remove(user.getSession());
@@ -653,7 +653,7 @@ public class MumbleClient implements Closeable {
         // Only send events after we are synced
         if (this.synced) {
             if (connected) {
-                fireEvent(new MumbleEvents.UserAdd(user));
+                fireEvent(new MumbleEvents.UserConnected(user));
             }
             fireEvent(new MumbleEvents.UserState(user, userState));
         }

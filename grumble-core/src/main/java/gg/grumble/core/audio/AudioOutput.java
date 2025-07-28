@@ -111,7 +111,7 @@ public class AudioOutput {
             long actualNow = System.nanoTime();
             long drift = actualNow - nextTime;
             if (Math.abs(drift) > intervalNanos) {
-                LOG.warn("AudioOutput drift: {} us", drift / 1000);
+                LOG.warn("AudioOutput drift: {} ms", drift / 1e6);
                 nextTime = actualNow; // hard reset on large drift
             } else {
                 nextTime += intervalNanos;

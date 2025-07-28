@@ -45,10 +45,10 @@ public final class MumbleEvents {
     public record ChannelState(MumbleChannel channel, MumbleProto.ChannelState state) implements MumbleEvent {
     }
 
-    public record UserAdd(MumbleUser user) implements MumbleEvent {
+    public record UserConnected(MumbleUser user) implements MumbleEvent {
     }
 
-    public record UserRemove(MumbleUser user, MumbleProto.UserRemove remove) implements MumbleEvent {
+    public record UserDisconnected(MumbleUser user, MumbleProto.UserRemove remove) implements MumbleEvent {
     }
 
     public record UserState(MumbleUser user, MumbleProto.UserState state) implements MumbleEvent {

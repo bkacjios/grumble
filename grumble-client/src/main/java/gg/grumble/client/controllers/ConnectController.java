@@ -45,9 +45,9 @@ public class ConnectController implements Initializable {
     @FXML
     private TreeTableColumn<ServerEntry, Integer> usersColumn;
 
-    private final TreeItem<ServerEntry> favorites = new TreeItem<>(new ServerEntry("Favorites"));
-    private final TreeItem<ServerEntry> lan = new TreeItem<>(new ServerEntry("LAN"));
-    private final TreeItem<ServerEntry> internet = new TreeItem<>(new ServerEntry("Public Internet"));
+    private final TreeItem<ServerEntry> favorites;
+    private final TreeItem<ServerEntry> lan;
+    private final TreeItem<ServerEntry> internet;
 
     private final MumbleServerListService serverListService;
     private final ConfigService configService;
@@ -55,6 +55,28 @@ public class ConnectController implements Initializable {
     public ConnectController(MumbleServerListService serverListService, ConfigService configService) {
         this.serverListService = serverListService;
         this.configService = configService;
+
+        Image favImage = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/emblem-favorite.png")),
+                ICON_SIZE, ICON_SIZE, true, true);
+        Image lanImage = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/network-workgroup.png")),
+                ICON_SIZE, ICON_SIZE, true, true);
+        Image netImage = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/connect.png")),
+                ICON_SIZE, ICON_SIZE, true, true);
+
+        favorites = new TreeItem<>(new ServerEntry("Favorites", fitIcon(favImage)));
+        lan = new TreeItem<>(new ServerEntry("LAN", fitIcon(lanImage)));
+        internet = new TreeItem<>(new ServerEntry("Public Internet", fitIcon(netImage)));
+    }
+
+    private ImageView fitIcon(Image img) {
+        ImageView iv = new ImageView(img);
+        iv.setFitWidth(ICON_SIZE);
+        iv.setFitHeight(ICON_SIZE);
+        iv.setPreserveRatio(true);
+        iv.setSmooth(true);
+        iv.setCache(true);
+        iv.setCacheHint(CacheHint.SPEED);
+        return iv;
     }
 
     private <T> Callback<TreeTableColumn<ServerEntry, T>, TreeTableCell<ServerEntry, T>> createBlankCellFactory() {
@@ -74,17 +96,6 @@ public class ConnectController implements Initializable {
                 }
             }
         };
-    }
-
-    private ImageView fitIcon(Image img) {
-        ImageView iv = new ImageView(img);
-        iv.setFitWidth(ICON_SIZE);
-        iv.setFitHeight(ICON_SIZE);
-        iv.setPreserveRatio(true);
-        iv.setSmooth(true);
-        iv.setCache(true);
-        iv.setCacheHint(CacheHint.SPEED);
-        return iv;
     }
 
     @Override
@@ -109,14 +120,12 @@ public class ConnectController implements Initializable {
                     setText(item);
                     setAlignment(Pos.CENTER_LEFT);
 
-                    // if it's one of our top-level category nodes, re-apply its icon
-                    if (ti != null && ti.getParent() == treeTableView.getRoot()) {
-                        setGraphic(ti.getGraphic());
-                        setPadding(new Insets(0, 0, 0, -20));
+                    // apply icon if it has one
+                    if (ti != null && ti.getValue() != null) {
+                        setGraphic(ti.getValue().getIcon());
                     } else {
                         // normal leaf rows get no graphic
                         setGraphic(null);
-                        setPadding(new Insets(0, 0, 0, 0));
                     }
                 }
             }
@@ -127,17 +136,6 @@ public class ConnectController implements Initializable {
         // create a hidden root so we can show three top-level categories
         TreeItem<ServerEntry> hiddenRoot = new TreeItem<>(new ServerEntry("ROOT"));
         hiddenRoot.setExpanded(true);
-
-        Image favImg = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/emblem-favorite.png")),
-                ICON_SIZE, ICON_SIZE, true, true);
-        Image lanImg = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/network-workgroup.png")),
-                ICON_SIZE, ICON_SIZE, true, true);
-        Image netImg = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/connect.png")),
-                ICON_SIZE, ICON_SIZE, true, true);
-
-        favorites.setGraphic(fitIcon(favImg));
-        lan.setGraphic(fitIcon(lanImg));
-        internet.setGraphic(fitIcon(netImg));
 
         // the three main nodes
         hiddenRoot.getChildren().addAll(Arrays.asList(favorites, lan, internet));
@@ -220,6 +218,7 @@ public class ConnectController implements Initializable {
      * Simple data-model for each row
      */
     public static class ServerEntry {
+        private final ImageView icon;
         private final StringProperty name = new SimpleStringProperty();
         private final IntegerProperty ca = new SimpleIntegerProperty();
         private final StringProperty continentCode = new SimpleStringProperty();
@@ -237,6 +236,7 @@ public class ConnectController implements Initializable {
          * Populate from the XML‐fetched MumbleServer
          */
         public ServerEntry(MumbleServer server) {
+            this.icon = null;
             this.name.set(server.getName());
             this.ca.set(server.getCa());
             this.continentCode.set(server.getContinentCode());
@@ -249,6 +249,7 @@ public class ConnectController implements Initializable {
         }
 
         public ServerEntry(ServerConfig serverConfig) {
+            this.icon = null;
             this.name.set(serverConfig.getLabel());
             this.ip.set(serverConfig.getAddress());
             this.port.set(serverConfig.getPort());
@@ -256,7 +257,17 @@ public class ConnectController implements Initializable {
         }
 
         public ServerEntry(String name) {
+            this.icon = null;
             this.name.set(name);
+        }
+
+        public ServerEntry(String name, ImageView icon) {
+            this.name.set(name);
+            this.icon = icon;
+        }
+
+        public ImageView getIcon() {
+            return icon;
         }
 
         public StringProperty nameProperty() {
