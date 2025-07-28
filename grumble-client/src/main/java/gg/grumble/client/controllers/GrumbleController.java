@@ -7,6 +7,7 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
 import gg.grumble.client.models.MumbleUserFx;
 import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.client.services.LanguageService;
+import gg.grumble.client.services.LinkUrlService;
 import gg.grumble.client.utils.Closeable;
 import gg.grumble.client.utils.WindowIcon;
 import gg.grumble.core.audio.input.TargetDataLineInputDevice;
@@ -79,6 +80,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     private final MumbleClient client;
     private final LanguageService lang;
     private final FxmlLoaderService fxmlLoaderService;
+    private final LinkUrlService linkService;
     private final HostServices hostServices;
 
     private final Map<MumbleChannel, TreeItem<Object>> channelNodeMap = new HashMap<>();
@@ -99,10 +101,11 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     private Image userAuthenticatedIcon;
 
     public GrumbleController(MumbleClient client, LanguageService lang, FxmlLoaderService fxmlLoaderService,
-                             HostServices hostServices) throws LineUnavailableException {
+                             LinkUrlService linkService, HostServices hostServices) throws LineUnavailableException {
         this.client = client;
         this.lang = lang;
         this.fxmlLoaderService = fxmlLoaderService;
+        this.linkService = linkService;
         this.hostServices = hostServices;
 
         client.setAudioOutput(new SourceDataLineOutputDevice());
@@ -213,11 +216,25 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 mumbleTree.setShowRoot(true);
             });
         });
-        client.addEventListener(MumbleEvents.UserConnected.class, event -> {
-            Platform.runLater(() -> addUserToChannel(event.user(), event.user().getChannel()));
+        client.addEventListener(MumbleEvents.UserAdd.class, event -> {
+            Platform.runLater(() -> {
+                addUserToChannel(event.user(), event.user().getChannel());
+                if (event.user().getChannel() == client.getSelf().getChannel()) {
+                    addMessage(lang.t("mumble.event.user.connected.channel", event.user().getUrl()));
+                } else {
+                    addMessage(lang.t("mumble.event.user.connected", event.user().getUrl()));
+                }
+            });
         });
         client.addEventListener(MumbleEvents.UserRemove.class, event -> {
-            Platform.runLater(() -> removeUserFromChannel(event.user(), event.user().getChannel()));
+            Platform.runLater(() -> {
+                removeUserFromChannel(event.user(), event.user().getChannel());
+                if (event.user().getChannel() == client.getSelf().getChannel()) {
+                    addMessage(lang.t("mumble.event.user.disconnected.channel", event.user().getUrl()));
+                } else {
+                    addMessage(lang.t("mumble.event.user.disconnected", event.user().getUrl()));
+                }
+            });
         });
         client.addEventListener(MumbleEvents.ChannelCreated.class, event -> {
             Platform.runLater(() -> createChannel(event.channel()));
@@ -261,8 +278,14 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
             Platform.runLater(() -> {
                 MumbleProto.TextMessage message = event.message();
                 MumbleUser sender = client.getUser(message.getActor());
-                addMessage(String.format("%s: %s", sender.getUrl(), message.getMessage()));
-                LOG.info("Message: {}", message.getMessage());
+
+                if (event.message().getChannelIdCount() > 0) {
+                    addMessage(lang.t("mumble.event.chat.channel", sender.getUrl(), message.getMessage()));
+                } else if (event.message().getTreeIdCount() > 0) {
+                    addMessage(lang.t("mumble.event.chat.tree", sender.getUrl(), message.getMessage()));
+                } else {
+                    addMessage(lang.t("mumble.event.chat.private", sender.getUrl(), message.getMessage()));
+                }
             });
         });
 
@@ -481,19 +504,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
             // TODO open chat window
         });
 
-        MenuItem infoItem = new MenuItem("Information");
-        infoItem.setOnAction(evt -> {
-            Pair<Stage, UserStatsController> stageController = fxmlLoaderService.createWindow("/fxml/userStats.fxml");
-            Stage stage = stageController.getKey();
-            UserStatsController controller = stageController.getValue();
-            controller.setClientSession(this.client, userFx.getUser());
-            stage.initStyle(StageStyle.UTILITY);
-            stage.show();
-            stage.sizeToScene();
-            stage.centerOnScreen();
-            stage.setMinWidth(stage.getWidth());
-            stage.setMinHeight(stage.getHeight());
-        });
+        MenuItem infoItem = createInformationItem(userFx);
 
         MenuItem addFriendItem = new MenuItem("Add Friend");
         addFriendItem.setOnAction(evt -> {
@@ -518,6 +529,23 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         );
     }
 
+    private MenuItem createInformationItem(MumbleUserFx userFx) {
+        MenuItem infoItem = new MenuItem("Information");
+        infoItem.setOnAction(evt -> {
+            Pair<Stage, UserStatsController> stageController = fxmlLoaderService.createWindow("/fxml/userStats.fxml");
+            Stage stage = stageController.getKey();
+            UserStatsController controller = stageController.getValue();
+            controller.setClientSession(this.client, userFx.getUser());
+            stage.initStyle(StageStyle.UTILITY);
+            stage.show();
+            stage.sizeToScene();
+            stage.centerOnScreen();
+            stage.setMinWidth(stage.getWidth());
+            stage.setMinHeight(stage.getHeight());
+        });
+        return infoItem;
+    }
+
     private void initializeChat() {
         chatArea.setEditable(false);
         chatArea.setWrapText(true);
@@ -537,7 +565,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
         chatMessage.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
             if (event.getCode() == KeyCode.ENTER) {
-                // always consume, so nothing is ever auto-inserted
+                // always consume, so nothing ihttps://mvnrepository.com/artifact/org.apache.commons/commons-texts ever auto-inserted
                 event.consume();
 
                 if (event.isShiftDown()) {
@@ -603,6 +631,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
     private void addMessage(String message) {
         if (message == null || message.isEmpty()) return;
+        LOG.info(linkService.cleanHtml(message));
 
         // timestamp
         String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
@@ -753,19 +782,20 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
     }
 
     private void sendMessage(String message) {
+        message = linkService.linkifyUrls(message);
         Object selected = getSelectedTreeItem();
         if (selected instanceof MumbleUserFx user) {
             // Whisper message to selected user
-            addMessage(String.format("To %s: %s", user.getUser().getUrl(), message));
+            addMessage(lang.t("mumble.event.chat.send", user.getUser().getUrl(), message));
             user.getUser().message(message);
         } else if (selected instanceof MumbleChannel channel) {
             // Send message to everyone in selected channel
-            addMessage(String.format("To %s: %s", channel.getUrl(), message));
+            addMessage(lang.t("mumble.event.chat.send", channel.getUrl(), message));
             channel.message(message);
         } else {
             // Send message to everyone in current channel
             MumbleChannel channel = client.getSelf().getChannel();
-            addMessage(String.format("To %s: %s", channel.getUrl(), message));
+            addMessage(lang.t("mumble.event.chat.send", channel.getUrl(), message));
             channel.message(message);
         }
     }

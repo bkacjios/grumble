@@ -158,6 +158,9 @@ dependencies {
     // jsoup (HTML parsing)
     implementation 'org.jsoup:jsoup:1.21.1'
 
+    // commons text (HTML cleanup)
+    implementation 'org.apache.commons:commons-text:1.14.0'
+
     // lwjgl natives
     runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-windows"
     runtimeOnly "org.lwjgl:lwjgl:3.3.6:natives-linux"

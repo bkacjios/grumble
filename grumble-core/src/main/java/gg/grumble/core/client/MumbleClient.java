@@ -653,7 +653,7 @@ public class MumbleClient implements Closeable {
         // Only send events after we are synced
         if (this.synced) {
             if (connected) {
-                fireEvent(new MumbleEvents.UserConnected(user));
+                fireEvent(new MumbleEvents.UserAdd(user));
             }
             fireEvent(new MumbleEvents.UserState(user, userState));
         }
