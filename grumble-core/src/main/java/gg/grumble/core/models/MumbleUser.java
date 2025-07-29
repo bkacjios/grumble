@@ -46,11 +46,11 @@ public class MumbleUser {
     private final TreeMap<Long, float[]> jitterBuffer = new TreeMap<>();
     private long lastPlayedSequence = -1;
 
-    private int plcCount = 0;
     private static final byte[] EMPTY_BYTES = new byte[0];
 
-    private static final int JITTER_PREFILL_FRAMES = 2;
+    private long jitterPrefillStartTime = 0;
     private boolean jitterReady = false;
+    private int plcCount = 0;
 
     private boolean autoGainEnabled = false;
     private float manualGain = 1.0f;
@@ -209,13 +209,26 @@ public class MumbleUser {
         // Copy only the needed samples
         float[] pcm = Arrays.copyOf(decodedPcm, sampleCount);
         synchronized (jitterBuffer) {
-            if (sequence <= lastPlayedSequence || jitterBuffer.containsKey(sequence)) {
-                // Drop duplicates or too-old frames
+            long age = lastPlayedSequence - sequence;
+            if (age > JITTER_MAX_PLC_FRAMES) {
+                LOG.warn("Dropping frame: {} frames late", age);
+                return;
+            }
+
+            if (jitterBuffer.containsKey(sequence)) {
+                // Drop duplicate
+                LOG.warn("Dropping duplicate frame: {}", sequence);
                 return;
             }
             jitterBuffer.put(sequence, pcm);
-            if (jitterBuffer.size() > 10) {
-                jitterBuffer.pollFirstEntry(); // avoid unbounded growth
+
+            while (!jitterBuffer.isEmpty() &&
+                    jitterBuffer.firstKey() <= (lastPlayedSequence - JITTER_MAX_PLC_FRAMES)) {
+                jitterBuffer.pollFirstEntry(); // evict unusable frames
+            }
+
+            if (jitterBuffer.size() > JITTER_MAX_TOTAL_FRAMES) {
+                jitterBuffer.pollFirstEntry(); // prevent runaway growth
             }
         }
     }
@@ -225,13 +238,20 @@ public class MumbleUser {
             int filled = 0;
             long nextSeq = lastPlayedSequence + 1;
 
+            // Initial jitter prefill
             if (!jitterReady) {
+                if (jitterPrefillStartTime == 0) {
+                    jitterPrefillStartTime = System.currentTimeMillis();
+                }
+
                 int available = 0;
                 long seq = nextSeq;
                 while (jitterBuffer.containsKey(seq++) && available < JITTER_PREFILL_FRAMES) {
                     available++;
                 }
-                if (available >= JITTER_PREFILL_FRAMES) {
+
+                if (available >= JITTER_PREFILL_FRAMES ||
+                        (System.currentTimeMillis() - jitterPrefillStartTime) > JITTER_PREFILL_TIMEOUT_MS) {
                     jitterReady = true;
                 } else {
                     Arrays.fill(out, 0, maxSamples, 0f);
@@ -239,20 +259,18 @@ public class MumbleUser {
                 }
             }
 
-            // Pull as many in-order frames as needed to fill maxSamples
+            // Playback from jitter buffer
             while (filled < maxSamples) {
                 float[] frame = jitterBuffer.remove(nextSeq);
                 if (frame == null) break;
 
                 int frameLen = frame.length;
                 int toCopy = Math.min(frameLen, maxSamples - filled);
-
                 System.arraycopy(frame, 0, out, filled, toCopy);
                 filled += toCopy;
 
                 if (toCopy < frameLen) {
-                    float[] leftover = new float[frameLen - toCopy];
-                    System.arraycopy(frame, toCopy, leftover, 0, leftover.length);
+                    float[] leftover = Arrays.copyOfRange(frame, toCopy, frameLen);
                     jitterBuffer.put(nextSeq, leftover);
                     break; // keep same nextSeq on next tick
                 }
@@ -268,12 +286,12 @@ public class MumbleUser {
                 return maxSamples;
             }
 
-            // No queued frames, try PLC / resync / silence
+            // Check for a future frame
             Map.Entry<Long, float[]> upcoming = jitterBuffer.firstEntry();
             if (upcoming != null) {
                 long futureSeq = upcoming.getKey();
                 long gap = futureSeq - nextSeq;
-                if (gap > MAX_PLC_FRAMES) {
+                if (gap > JITTER_MAX_PLC_FRAMES) {
                     if (LOG.isWarnEnabled()) {
                         LOG.warn("Audio gap too large ({} frames), resynchronizing user {}", gap, name);
                     }
@@ -285,7 +303,7 @@ public class MumbleUser {
             }
 
             // Try to fill gap with PLC
-            if (this.transmitting && plcCount < MAX_PLC_FRAMES) {
+            if (this.transmitting && plcCount < JITTER_MAX_PLC_FRAMES) {
                 plcCount++;
                 lastPlayedSequence = nextSeq;
 
@@ -298,10 +316,12 @@ public class MumbleUser {
                 synchronized (decoder) {
                     decoded = decoder.decodeFloat(EMPTY_BYTES, out, SAMPLES_PER_FRAME);
                 }
+
                 if (decoded <= 0) {
                     Arrays.fill(out, 0, maxSamples, 0f);
                     return 0;
                 }
+
                 Arrays.fill(out, decoded, maxSamples, 0f);
                 return decoded;
             }
