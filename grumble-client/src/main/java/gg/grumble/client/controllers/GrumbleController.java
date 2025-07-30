@@ -110,7 +110,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
         client.setAudioOutput(new SourceDataLineOutputDevice());
         client.setAudioInput(new TargetDataLineInputDevice());
-        client.setVolume(0.05f);
+        client.setVolume(1.0f);
     }
 
     private void loadIcons() {
