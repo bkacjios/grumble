@@ -1,5 +1,6 @@
-package gg.grumble.client.services;
+package gg.grumble.client.components;
 
+import gg.grumble.client.services.LanguageService;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleUser;
@@ -13,9 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @Component
@@ -24,10 +23,12 @@ public class NotificationService {
 
     private final LanguageService lang;
     private final MumbleClient client;
+    private final PrimaryStageHolder primaryStageHolder;
 
-    public NotificationService(LanguageService lang, MumbleClient client) {
+    public NotificationService(LanguageService lang, MumbleClient client, PrimaryStageHolder primaryStageHolder) {
         this.lang = lang;
         this.client = client;
+        this.primaryStageHolder = primaryStageHolder;
     }
 
     @DBusInterfaceName("org.freedesktop.Notifications")
@@ -55,9 +56,20 @@ public class NotificationService {
                         "mumble.event.user.connected", event.user().getName());
             }
         });
+        client.addEventListener(MumbleEvents.UserDisconnected.class, event -> {
+            if (event.user().getChannel() == client.getSelf().getChannel()) {
+                show("mumble.notification.user.disconnected",
+                        "mumble.event.user.disconnected.channel", event.user().getName());
+            } else {
+                show("mumble.notification.user.disconnected",
+                        "mumble.event.user.disconnected", event.user().getName());
+            }
+        });
     }
 
     private void show(String titleKey, String messageKey, Object... args) {
+        if (!primaryStageHolder.isIconified()) return;
+
         String title = lang.t(titleKey);
         String message = lang.t(messageKey, args);
 

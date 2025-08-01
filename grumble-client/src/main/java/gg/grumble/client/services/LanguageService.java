@@ -1,5 +1,6 @@
 package gg.grumble.client.services;
 
+import gg.grumble.client.components.LocaleProvider;
 import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Service;
 

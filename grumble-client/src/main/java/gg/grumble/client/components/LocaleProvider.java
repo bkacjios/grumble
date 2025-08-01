@@ -1,4 +1,4 @@
-package gg.grumble.client.services;
+package gg.grumble.client.components;
 
 import org.springframework.stereotype.Component;
 

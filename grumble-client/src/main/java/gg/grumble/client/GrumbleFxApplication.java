@@ -1,5 +1,6 @@
 package gg.grumble.client;
 
+import gg.grumble.client.components.PrimaryStageHolder;
 import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.client.utils.ExceptionHandler;
 import javafx.application.Application;
@@ -38,6 +39,7 @@ public class GrumbleFxApplication extends Application {
     public void start(Stage stage) {
         Thread.currentThread().setName("javafx");
         ExceptionHandler.installHandlerForCurrentThread();
+        context.getBean(PrimaryStageHolder.class).setStage(stage);
         try {
             fxmlLoaderService.createWindow(stage, "/fxml/main.fxml");
             stage.setTitle("Grumble");
