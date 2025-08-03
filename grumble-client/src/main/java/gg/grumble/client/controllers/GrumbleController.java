@@ -229,7 +229,12 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         client.addEventListener(MumbleEvents.UserDisconnected.class, event -> {
             Platform.runLater(() -> {
                 removeUserFromChannel(event.user(), event.user().getChannel());
-                if (event.user().getChannel() == client.getSelf().getChannel()) {
+                if (event.actor() != null) {
+                    String type = event.ban() ? "mumble.event.user.banned" : "mumble.event.user.kicked";
+                    String reason = Objects.requireNonNullElse(event.reason(),
+                            lang.t("mumble.event.user.removed.no_reason"));
+                    addMessage(lang.t(type, event.user().getUrl(), event.actor().getUrl(), reason));
+                } else if (event.user().getChannel() == client.getSelf().getChannel()) {
                     addMessage(lang.t("mumble.event.user.disconnected.channel", event.user().getUrl()));
                 } else {
                     addMessage(lang.t("mumble.event.user.disconnected", event.user().getUrl()));
@@ -263,14 +268,39 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         client.addEventListener(MumbleEvents.UserChangedChannel.class, event -> {
             Platform.runLater(() -> {
                 MumbleUser user = event.user();
-                removeUserFromChannel(user, event.from());
-                addUserToChannel(user, event.to());
+                MumbleUser actor = event.actor();
+                MumbleChannel from = event.from();
+                MumbleChannel to = event.to();
+                MumbleChannel selfChannel = client.getSelf().getChannel();
+
+                removeUserFromChannel(user, from);
+                addUserToChannel(user, to);
+
+                // You were moved
                 if (user == client.getSelf()) {
-                    addMessage(lang.t("mumble.event.channel.joined", event.to().getUrl()));
-                } else if (client.getSelf().getChannel() == event.to()) {
-                    addMessage(lang.t("mumble.event.channel.entered", event.user().getUrl()));
-                } else {
-                    addMessage(lang.t("mumble.event.channel.moved", event.user().getUrl(), event.to().getUrl()));
+                    if (actor != user) {
+                        addMessage(lang.t("mumble.event.channel.forced", to.getUrl(), actor.getUrl()));
+                    } else {
+                        addMessage(lang.t("mumble.event.channel.joined", to.getUrl()));
+                    }
+                    return;
+                }
+
+                boolean enteredSelfChannel = to == selfChannel;
+                boolean leftSelfChannel = from == selfChannel;
+
+                if (enteredSelfChannel) {
+                    if (actor == user) {
+                        addMessage(lang.t("mumble.event.channel.entered", user.getUrl()));
+                    } else {
+                        addMessage(lang.t("mumble.event.channel.moved.actor", user.getUrl(), to.getUrl(), actor.getUrl()));
+                    }
+                } else if (leftSelfChannel) {
+                    if (actor == user) {
+                        addMessage(lang.t("mumble.event.channel.moved", user.getUrl(), to.getUrl()));
+                    } else {
+                        addMessage(lang.t("mumble.event.channel.moved.actor", user.getUrl(), to.getUrl(), actor.getUrl()));
+                    }
                 }
             });
         });
@@ -628,6 +658,10 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                     });
                 });
     }
+
+//    private void addMessage(String messageKey, Object... args) {
+//        addMessage(lang.t(messageKey, args));
+//    }
 
     private void addMessage(String message) {
         if (message == null || message.isEmpty()) return;

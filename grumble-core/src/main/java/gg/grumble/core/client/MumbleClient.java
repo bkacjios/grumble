@@ -314,7 +314,7 @@ public class MumbleClient implements Closeable {
     }
 
     private void onServerSync(MumbleProto.ServerSync sync) {
-        this.self = users.get(Integer.toUnsignedLong(sync.getSession()));
+        this.self = getUser(sync.getSession());
         this.synced = true;
 
         LOG.info("Fully synced with server");
@@ -561,13 +561,13 @@ public class MumbleClient implements Closeable {
      * @param channel     Channel we are updating
      * @param newParentId Channels new parent ID
      */
-    private void updateChannelParent(MumbleChannel channel, long newParentId) {
+    private void updateChannelParent(MumbleChannel channel, int newParentId) {
         removeChildFromParent(channel);
-        childrenByParent.computeIfAbsent(newParentId, k -> new ArrayList<>()).add(channel);
+        childrenByParent.computeIfAbsent(Integer.toUnsignedLong(newParentId), k -> new ArrayList<>()).add(channel);
     }
 
     private void onChannelRemove(MumbleProto.ChannelRemove channelRemove) {
-        MumbleChannel channel = channels.remove(Integer.toUnsignedLong(channelRemove.getChannelId()));
+        MumbleChannel channel = removeChannel(channelRemove.getChannelId());
 
         if (channel != null) {
             removeChildFromParent(channel);
@@ -608,16 +608,18 @@ public class MumbleClient implements Closeable {
     }
 
     private void onUserRemove(MumbleProto.UserRemove userRemove) {
-        MumbleUser user = users.remove(Integer.toUnsignedLong(userRemove.getSession()));
+        MumbleUser user = removeUser(userRemove.getSession());
+        MumbleUser actor = userRemove.hasActor() ? getUser(userRemove.getActor()) : null;
+        String reason = userRemove.hasReason() ? userRemove.getReason() : null;
 
-        fireEvent(new MumbleEvents.UserDisconnected(user, userRemove));
+        fireEvent(new MumbleEvents.UserDisconnected(user, actor, reason, userRemove.getBan()));
 
         removeUserFromChannel(user);
         opusDecoders.remove(user.getSession());
     }
 
     private void onUserState(MumbleProto.UserState userState) {
-        long session = userState.getSession();
+        long session = Integer.toUnsignedLong(userState.getSession());
 
         MumbleUser user = users.get(session);
         boolean connected = false;
@@ -637,13 +639,14 @@ public class MumbleClient implements Closeable {
         if (this.synced && userState.hasChannelId()) {
             // We are fully synced and the user is changing channels
             long fromChannelId = user.getChannelId();
-            long toChannelId = userState.getChannelId();
+            long toChannelId = Integer.toUnsignedLong(userState.getChannelId());
 
             if (!Objects.equals(fromChannelId, toChannelId)) {
                 MumbleChannel from = getChannel(fromChannelId);
                 MumbleChannel to = getChannel(toChannelId);
+                MumbleUser actor = getUser(userState.getActor());
                 // Custom event to signal that the user changed their channel
-                fireEvent(new MumbleEvents.UserChangedChannel(user, from, to));
+                fireEvent(new MumbleEvents.UserChangedChannel(user, from, to, actor));
             }
         }
 
@@ -854,7 +857,7 @@ public class MumbleClient implements Closeable {
      * @param audio Audio protobuf message
      */
     private void handleProtobufAudio(MumbleUDPProto.Audio audio) {
-        long session = audio.getSenderSession();
+        int session = audio.getSenderSession();
         long sequence = audio.getFrameNumber();
         boolean transmitting = audio.getIsTerminator();
 
@@ -1275,16 +1278,40 @@ public class MumbleClient implements Closeable {
         return List.copyOf(users.values());
     }
 
+    public MumbleUser getUser(int session) {
+        return getUser(Integer.toUnsignedLong(session));
+    }
+
     public MumbleUser getUser(long session) {
         return users.get(session);
+    }
+
+    public MumbleUser removeUser(int session) {
+        return removeUser(Integer.toUnsignedLong(session));
+    }
+
+    public MumbleUser removeUser(long session) {
+        return users.remove(session);
     }
 
     public List<MumbleChannel> getChannels() {
         return List.copyOf(channels.values());
     }
 
+    public MumbleChannel getChannel(int channelId) {
+        return getChannel(Integer.toUnsignedLong(channelId));
+    }
+
     public MumbleChannel getChannel(long channelId) {
         return channels.get(channelId);
+    }
+
+    public MumbleChannel removeChannel(int channelId) {
+        return removeChannel(Integer.toUnsignedLong(channelId));
+    }
+
+    public MumbleChannel removeChannel(long channelId) {
+        return channels.remove(channelId);
     }
 
     public List<MumbleUser> getChannelUsers(MumbleChannel channel) {

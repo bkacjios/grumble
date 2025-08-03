@@ -3,6 +3,7 @@ package gg.grumble.client.components;
 import gg.grumble.client.services.LanguageService;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
+import gg.grumble.core.models.MumbleChannel;
 import gg.grumble.core.models.MumbleUser;
 import jakarta.annotation.PostConstruct;
 import org.freedesktop.dbus.annotations.DBusInterfaceName;
@@ -16,10 +17,12 @@ import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @Component
+@SuppressWarnings("unused")
 public class NotificationService {
-    private static final Logger LOG = LoggerFactory.getLogger(MumbleUser.class);
+    private static final Logger LOG = LoggerFactory.getLogger(NotificationService.class);
 
     private final LanguageService lang;
     private final MumbleClient client;
@@ -57,12 +60,59 @@ public class NotificationService {
             }
         });
         client.addEventListener(MumbleEvents.UserDisconnected.class, event -> {
-            if (event.user().getChannel() == client.getSelf().getChannel()) {
+            if (event.actor() != null) {
+                String titleKey = event.ban() ? "mumble.notification.user.banned" : "mumble.notification.user.kicked";
+                String messageKey = event.ban() ? "mumble.event.user.banned" : "mumble.event.user.kicked";
+                String reason = Objects.requireNonNullElse(event.reason(),
+                        lang.t("mumble.event.user.removed.no_reason"));
+                show(titleKey, messageKey, event.user().getUrl(), event.actor().getUrl(), reason);
+            } else if (event.user().getChannel() == client.getSelf().getChannel()) {
                 show("mumble.notification.user.disconnected",
                         "mumble.event.user.disconnected.channel", event.user().getName());
             } else {
                 show("mumble.notification.user.disconnected",
                         "mumble.event.user.disconnected", event.user().getName());
+            }
+        });
+        client.addEventListener(MumbleEvents.UserChangedChannel.class, event -> {
+            MumbleUser user = event.user();
+            MumbleUser actor = event.actor();
+            MumbleChannel from = event.from();
+            MumbleChannel to = event.to();
+            MumbleChannel selfChannel = client.getSelf().getChannel();
+
+            // You were moved
+            if (user == client.getSelf()) {
+                if (actor != user) {
+                    // You were moved by someone else
+                    show("mumble.notification.user.moved", "mumble.event.channel.forced", to.getName(), actor.getName());
+                } else {
+                    // You moved yourself
+                    show("mumble.notification.user.moved", "mumble.event.channel.joined", to.getName());
+                }
+                return;
+            }
+
+            // Another user entered or left your current channel
+            boolean enteredSelfChannel = to == selfChannel;
+            boolean leftSelfChannel = from == selfChannel;
+
+            if (enteredSelfChannel) {
+                if (actor == user) {
+                    // User joined your channel on their own
+                    show("mumble.notification.user.moved", "mumble.event.channel.entered", user.getName());
+                } else {
+                    // User was moved into your channel by someone else
+                    show("mumble.notification.user.moved", "mumble.event.channel.moved.actor", user.getName(), to.getName(), actor.getName());
+                }
+            } else if (leftSelfChannel) {
+                if (actor == user) {
+                    // User left your channel on their own
+                    show("mumble.notification.user.moved", "mumble.event.channel.moved", user.getName(), to.getName());
+                } else {
+                    // User was moved out of your channel by someone else
+                    show("mumble.notification.user.moved", "mumble.event.channel.moved.actor", user.getName(), to.getName(), actor.getName());
+                }
             }
         });
     }
@@ -86,7 +136,7 @@ public class NotificationService {
             notifications.Notify(
                     "Grumble",  // app name
                     new UInt32(0), // replaces_id
-                    "",                  // icon
+                    "mumble",                  // icon
                     title,               // summary
                     message,             // body
                     new String[0],       // actions

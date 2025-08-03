@@ -48,13 +48,13 @@ public final class MumbleEvents {
     public record UserConnected(MumbleUser user) implements MumbleEvent {
     }
 
-    public record UserDisconnected(MumbleUser user, MumbleProto.UserRemove remove) implements MumbleEvent {
+    public record UserDisconnected(MumbleUser user, MumbleUser actor, String reason, boolean ban) implements MumbleEvent {
     }
 
     public record UserState(MumbleUser user, MumbleProto.UserState state) implements MumbleEvent {
     }
 
-    public record UserChangedChannel(MumbleUser user, MumbleChannel from, MumbleChannel to) implements MumbleEvent {
+    public record UserChangedChannel(MumbleUser user, MumbleChannel from, MumbleChannel to, MumbleUser actor) implements MumbleEvent {
     }
 
     public record BanList(MumbleProto.BanList banList) implements MumbleEvent {
