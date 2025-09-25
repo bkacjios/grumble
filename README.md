@@ -7,5 +7,5 @@ A work-in-progress Mumble client written in Java.
 * Channel/User tree view
 * All Mumble protocol events
 * Audio decoding/Mixing/Playback
-
-![java_bh7m4c8Web](https://github.com/user-attachments/assets/b1837923-776a-4100-b7d0-2d37c3fa791d)
+  
+<img width="738" height="402" alt="java_fIKfjQe7aP" src="https://github.com/user-attachments/assets/b5253751-7e20-4ea4-9e34-58d41b9c9421" />
