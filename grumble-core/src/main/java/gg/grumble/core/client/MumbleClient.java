@@ -636,7 +636,7 @@ public class MumbleClient implements Closeable {
             usersInChannel.computeIfAbsent(newChannel, k -> new ArrayList<>()).add(user);
         }
 
-        if (this.synced && userState.hasChannelId()) {
+        if (this.synced && userState.hasChannelId() && !connected) {
             // We are fully synced and the user is changing channels
             long fromChannelId = user.getChannelId();
             long toChannelId = Integer.toUnsignedLong(userState.getChannelId());
