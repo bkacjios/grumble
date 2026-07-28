@@ -30,7 +30,7 @@ public abstract class UiEventController implements Closeable {
                 ApplicationListener<?> listener = (ApplicationListener<ApplicationEvent>) event -> {
                     if (annotation.value().isAssignableFrom(event.getClass())) {
                         try {
-                            Platform.runLater(() -> {
+                            JavaFxUtils.runOnFxThread(() -> {
                                 try {
                                     method.invoke(this, event);
                                 } catch (Exception e) {

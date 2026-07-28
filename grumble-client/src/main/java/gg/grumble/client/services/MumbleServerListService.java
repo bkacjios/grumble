@@ -9,16 +9,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+
 @Service
 public class MumbleServerListService {
     private final WebClient client;
+    private final Duration fetchTimeout;
     private final XmlMapper xmlMapper = new XmlMapper();
 
-    public MumbleServerListService(@Value("${mumble.server.url}") String url, WebClient.Builder builder) {
+    public MumbleServerListService(@Value("${mumble.server.url}") String url,
+                                   @Value("${mumble.server.fetch.timeout}") long fetchTimeoutSeconds,
+                                   WebClient.Builder builder) {
         this.client = builder
                 .baseUrl(url)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.TEXT_XML_VALUE)
                 .build();
+        this.fetchTimeout = Duration.ofSeconds(fetchTimeoutSeconds);
     }
 
     /** Fetches the raw XML as String, then parses into your POJO */
@@ -27,6 +33,7 @@ public class MumbleServerListService {
                 .uri("/v1/list")
                 .retrieve()
                 .bodyToMono(String.class)
+                .timeout(fetchTimeout)
                 .map(xml -> {
                     try {
                         return xmlMapper.readValue(xml, MumbleServerList.class);

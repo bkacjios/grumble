@@ -9,6 +9,7 @@ import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.client.services.LanguageService;
 import gg.grumble.client.services.LinkUrlService;
 import gg.grumble.client.utils.Closeable;
+import gg.grumble.client.utils.JavaFxUtils;
 import gg.grumble.client.utils.WindowIcon;
 import gg.grumble.core.audio.input.TargetDataLineInputDevice;
 import gg.grumble.core.audio.output.SourceDataLineOutputDevice;
@@ -18,7 +19,6 @@ import gg.grumble.core.models.MumbleChannel;
 import gg.grumble.core.models.MumbleUser;
 import gg.grumble.mumble.MumbleProto;
 import javafx.application.HostServices;
-import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
@@ -190,19 +190,19 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
         client.addEventListener(MumbleEvents.Connected.class, ignored -> {
             client.authenticate("Java-BOT");
-            Platform.runLater(() -> addMessage(lang.t("mumble.event.connected")));
+            JavaFxUtils.runOnFxThread(() -> addMessage(lang.t("mumble.event.connected")));
         });
         client.addEventListener(MumbleEvents.ServerReject.class, event -> {
             String reason = event.reject().getReason();
             LOG.warn("Rejected from server: {}", reason);
-            Platform.runLater(() -> addMessage(lang.t("mumble.event.rejected", String.format("<span class='log-hostname'>%s</span>", reason))));
+            JavaFxUtils.runOnFxThread(() -> addMessage(lang.t("mumble.event.rejected", String.format("<span class='log-hostname'>%s</span>", reason))));
         });
         client.addEventListener(MumbleEvents.Disconnected.class, event -> {
             LOG.warn("Disconnected from mumble server: {}", event.reason());
             channelNodeMap.clear();
             userFxMap.clear();
             userNodeMap.clear();
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 mumbleTree.setRoot(null);
                 addMessage(lang.t("mumble.event.disconnected"));
             });
@@ -210,14 +210,14 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         client.addEventListener(MumbleEvents.ServerSync.class, event -> {
             TreeItem<Object> rootItem = buildTree(client.getChannel(0));
             rootItem.setExpanded(true);
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 addMessage(lang.t("mumble.event.welcome", event.sync().getWelcomeText()));
                 mumbleTree.setRoot(rootItem);
                 mumbleTree.setShowRoot(true);
             });
         });
         client.addEventListener(MumbleEvents.UserConnected.class, event -> {
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 addUserToChannel(event.user(), event.user().getChannel());
                 if (event.user().getChannel() == client.getSelf().getChannel()) {
                     addMessage(lang.t("mumble.event.user.connected.channel", event.user().getUrl()));
@@ -227,7 +227,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
             });
         });
         client.addEventListener(MumbleEvents.UserDisconnected.class, event -> {
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 removeUserFromChannel(event.user(), event.user().getChannel());
                 if (event.actor() != null) {
                     String type = event.ban() ? "mumble.event.user.banned" : "mumble.event.user.kicked";
@@ -242,31 +242,31 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
             });
         });
         client.addEventListener(MumbleEvents.ChannelCreated.class, event -> {
-            Platform.runLater(() -> createChannel(event.channel()));
+            JavaFxUtils.runOnFxThread(() -> createChannel(event.channel()));
         });
         client.addEventListener(MumbleEvents.ChannelRemove.class, event -> {
-            Platform.runLater(() -> removeChannel(event.channel()));
+            JavaFxUtils.runOnFxThread(() -> removeChannel(event.channel()));
         });
         client.addEventListener(MumbleEvents.UserStartSpeaking.class, event -> {
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 MumbleUserFx user = userFxMap.get(event.user());
                 if (user != null) user.setSpeaking(true);
             });
         });
         client.addEventListener(MumbleEvents.UserStopSpeaking.class, event -> {
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 MumbleUserFx user = userFxMap.get(event.user());
                 if (user != null) user.setSpeaking(false);
             });
         });
         client.addEventListener(MumbleEvents.UserState.class, event -> {
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 MumbleUserFx user = userFxMap.get(event.user());
                 if (user != null) user.update();
             });
         });
         client.addEventListener(MumbleEvents.UserChangedChannel.class, event -> {
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 MumbleUser user = event.user();
                 MumbleUser actor = event.actor();
                 MumbleChannel from = event.from();
@@ -305,7 +305,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
             });
         });
         client.addEventListener(MumbleEvents.TextMessage.class, event -> {
-            Platform.runLater(() -> {
+            JavaFxUtils.runOnFxThread(() -> {
                 MumbleProto.TextMessage message = event.message();
                 MumbleUser sender = client.getUser(message.getActor());
 
@@ -634,7 +634,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 .findFirst()
                 .map(channelNodeMap::get)
                 .ifPresent(item -> {
-                    Platform.runLater(() -> {
+                    JavaFxUtils.runOnFxThread(() -> {
                         expandPath(item);
                         mumbleTree.getSelectionModel().select(item);
                         mumbleTree.scrollTo(mumbleTree.getRow(item));
@@ -651,7 +651,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 .findFirst()
                 .map(userNodeMap::get)
                 .ifPresent(item -> {
-                    Platform.runLater(() -> {
+                    JavaFxUtils.runOnFxThread(() -> {
                         expandPath(item);
                         mumbleTree.getSelectionModel().select(item);
                         mumbleTree.scrollTo(mumbleTree.getRow(item));

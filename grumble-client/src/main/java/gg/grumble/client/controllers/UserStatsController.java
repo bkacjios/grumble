@@ -1,13 +1,13 @@
 package gg.grumble.client.controllers;
 
 import gg.grumble.client.utils.Closeable;
+import gg.grumble.client.utils.JavaFxUtils;
 import gg.grumble.client.utils.StageAware;
 import gg.grumble.client.utils.WindowIcon;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEventListener;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleUser;
-import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.stage.Stage;
@@ -123,7 +123,7 @@ public class UserStatsController implements StageAware, Closeable {
     }
 
     private void updateStatsLater(MumbleEvents.UserStats userStats) {
-        Platform.runLater(() -> updateStats(userStats));
+        JavaFxUtils.runOnFxThread(() -> updateStats(userStats));
     }
 
     private void updateStats(MumbleEvents.UserStats userStats) {

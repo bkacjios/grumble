@@ -20,11 +20,17 @@ public class ExceptionHandler {
     private static final Logger LOG = LogManager.getLogger(ExceptionHandler.class);
 
     public static void installHandlerForCurrentThread() {
-        Thread.currentThread().setUncaughtExceptionHandler((thread, throwable) -> {
-            LOG.error("Uncaught exception in thread: {}", thread.getName(), throwable);
-            // Show the exception on the JavaFX application thread
-            Platform.runLater(() -> show(throwable));
-        });
+        Thread.currentThread().setUncaughtExceptionHandler(ExceptionHandler::showLater);
+    }
+
+    public static void showLater(Throwable error) {
+        showLater(Thread.currentThread(), error);
+    }
+
+    private static void showLater(Thread thread, Throwable error) {
+        LOG.error("Uncaught exception in thread: {}", thread, error);
+        // Show the exception on the JavaFX application thread
+        JavaFxUtils.runOnFxThread(() -> show(error));
     }
 
     public static void show(Throwable t) {

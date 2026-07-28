@@ -4,8 +4,9 @@ import gg.grumble.client.config.ConfigService;
 import gg.grumble.client.config.ServerConfig;
 import gg.grumble.client.models.MumbleServer;
 import gg.grumble.client.services.MumbleServerListService;
+import gg.grumble.client.utils.ExceptionHandler;
+import gg.grumble.client.utils.JavaFxUtils;
 import gg.grumble.client.utils.WindowIcon;
-import javafx.application.Platform;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -14,13 +15,9 @@ import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
-import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.CacheHint;
-import javafx.scene.control.TreeItem;
-import javafx.scene.control.TreeTableCell;
-import javafx.scene.control.TreeTableColumn;
-import javafx.scene.control.TreeTableView;
+import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.util.Callback;
@@ -192,14 +189,16 @@ public class ConnectController implements Initializable {
 
     private void loadServerList() {
         serverListService.fetchServers()
-                .subscribe(list -> {
-                    List<TreeItem<ServerEntry>> items = list.getServers().stream()
-                            .map(ServerEntry::new)
-                            .map(TreeItem::new)
-                            .collect(Collectors.toList());
-
-                    Platform.runLater(() -> internet.getChildren().setAll(items));
-                });
+                .subscribe(
+                        list -> {
+                            List<TreeItem<ServerEntry>> items = list.getServers().stream()
+                                    .map(ServerEntry::new)
+                                    .map(TreeItem::new)
+                                    .collect(Collectors.toList());
+                            JavaFxUtils.runOnFxThread(() -> internet.getChildren().setAll(items));
+                        },
+                        ExceptionHandler::showLater
+                );
     }
 
     public void onConnect(ActionEvent actionEvent) {
