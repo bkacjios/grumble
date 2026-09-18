@@ -1,5 +1,6 @@
-package gg.grumble.client.components;
+package gg.grumble.client.notifications;
 
+import gg.grumble.client.components.PrimaryStageHolder;
 import gg.grumble.client.services.LanguageService;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
@@ -35,6 +36,7 @@ public class NotificationService {
     }
 
     @DBusInterfaceName("org.freedesktop.Notifications")
+    @SuppressWarnings("UnusedReturnValue")
     public interface DbusNotification extends DBusInterface {
         UInt32 Notify(
                 String app_name,

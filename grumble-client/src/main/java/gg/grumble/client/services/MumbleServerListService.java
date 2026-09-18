@@ -34,11 +34,11 @@ public class MumbleServerListService {
                 .retrieve()
                 .bodyToMono(String.class)
                 .timeout(fetchTimeout)
-                .map(xml -> {
+                .flatMap(xml -> {
                     try {
-                        return xmlMapper.readValue(xml, MumbleServerList.class);
+                        return Mono.just(xmlMapper.readValue(xml, MumbleServerList.class));
                     } catch (Exception e) {
-                        throw new RuntimeException("Failed to parse MumbleServerList XML", e);
+                        return Mono.error(new RuntimeException("Failed to parse MumbleServerList XML", e));
                     }
                 });
     }

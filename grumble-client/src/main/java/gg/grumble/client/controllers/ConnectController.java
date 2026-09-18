@@ -37,7 +37,6 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.net.URL;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Component
 @WindowIcon("/icons/connect.png")
@@ -301,7 +300,7 @@ public class ConnectController implements Initializable, Closeable {
                             List<TreeItem<ServerEntry>> items = list.getServers().stream()
                                     .map(ServerEntry::new)
                                     .map(TreeItem::new)
-                                    .collect(Collectors.toList());
+                                    .toList();
                             JavaFxUtils.runOnFxThread(() -> {
                                 internet.getChildren().setAll(items);
                                 items.forEach(item -> pingEntry(item.getValue(), MumbleServerPingQueue.Priority.PUBLIC));

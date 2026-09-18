@@ -110,7 +110,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
         client.setAudioOutput(new SourceDataLineOutputDevice());
         client.setAudioInput(new TargetDataLineInputDevice());
-        client.setVolume(1.0f);
+        client.setVolume(0.1f);
     }
 
     private void loadIcons() {
@@ -1016,7 +1016,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         return ca.getName().compareToIgnoreCase(cb.getName());
     }
 
-    public void onConnect(ActionEvent actionEvent) {
+    public void onConnect(ActionEvent ignored) {
         Pair<Stage, ConnectController> stageController = fxmlLoaderService.createWindow("/fxml/connect.fxml");
         Stage stage = stageController.getKey();
         stage.setTitle("Connect");
@@ -1026,7 +1026,7 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
         stage.centerOnScreen();
     }
 
-    public void onDisconnect(ActionEvent actionEvent) {
+    public void onDisconnect(ActionEvent ignored) {
         client.close();
     }
 

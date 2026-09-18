@@ -102,7 +102,7 @@ public class OpenALOutputDevice implements AudioOutputDevice {
 
     @Override
     public void setVolume(float volume) {
-        volume = Math.max(0f, Math.min(1f, volume));
+        volume = Math.clamp(volume, 0f, 1f);
         AL10.alSourcef(source, AL10.AL_GAIN, volume);
     }
 
