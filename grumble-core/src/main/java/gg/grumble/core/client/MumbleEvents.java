@@ -9,6 +9,9 @@ public final class MumbleEvents {
 
     public interface MumbleEvent {}
 
+    public record Connecting(String hostname) implements MumbleEvent {
+    }
+
     public record Connected(String hostname) implements MumbleEvent {
     }
 

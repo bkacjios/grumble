@@ -1,17 +1,14 @@
 package gg.grumble.core.models;
 
+import gg.grumble.core.audio.UserAudioBuffer;
 import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.enums.MumbleMessageType;
-import gg.grumble.core.opus.OpusDecoder;
 
-import gg.grumble.core.utils.StringUtils;
 import gg.grumble.mumble.MumbleProto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-
-import static gg.grumble.core.enums.MumbleAudioConfig.*;
 
 public class MumbleUser {
     private static final Logger LOG = LoggerFactory.getLogger(MumbleUser.class);
@@ -32,7 +29,6 @@ public class MumbleUser {
     private boolean prioritySpeaker;
     private boolean recording;
     private volatile boolean speaking;
-    private volatile boolean transmitting;
 
     private String comment;
     private String hash;
@@ -43,21 +39,12 @@ public class MumbleUser {
 
     private final Set<Integer> listeningChannels = new LinkedHashSet<>();
 
-    private final TreeMap<Long, float[]> jitterBuffer = new TreeMap<>();
-    private long lastPlayedSequence = -1;
-
-    private static final byte[] EMPTY_BYTES = new byte[0];
-
-    private long jitterPrefillStartTime = 0;
-    private boolean jitterReady = false;
-    private int plcCount = 0;
-
-    private boolean autoGainEnabled = false;
-    private float manualGain = 1.0f;
+    private final UserAudioBuffer audio;
 
     public MumbleUser(MumbleClient client, long session) {
         this.client = client;
         this.session = session;
+        this.audio = new UserAudioBuffer(this);
     }
 
     public void update(MumbleProto.UserState state) {
@@ -159,7 +146,7 @@ public class MumbleUser {
     }
 
     public boolean isTransmitting() {
-        return transmitting;
+        return audio.isTransmitting();
     }
 
     public String getComment() {
@@ -193,143 +180,12 @@ public class MumbleUser {
         return client.getChannel(channelId);
     }
 
-    public void pushPcmAudio(long sequence, float[] decodedPcm, int sampleCount, boolean transmitting) {
-        if (transmitting && !this.transmitting) {
-            synchronized (jitterBuffer) {
-                jitterBuffer.clear();
-                lastPlayedSequence = sequence - 1;
-            }
-        }
-
-        this.transmitting = transmitting;
-
-        // No audio data, user is transmitting silence
-        if (sampleCount <= 0) return;
-
-        // Copy only the needed samples
-        float[] pcm = Arrays.copyOf(decodedPcm, sampleCount);
-        synchronized (jitterBuffer) {
-            long age = lastPlayedSequence - sequence;
-            if (age > JITTER_MAX_PLC_FRAMES) {
-                LOG.warn("Dropping frame: {} frames late", age);
-                return;
-            }
-
-            if (jitterBuffer.containsKey(sequence)) {
-                // Drop duplicate
-                LOG.warn("Dropping duplicate frame: {}", sequence);
-                return;
-            }
-            jitterBuffer.put(sequence, pcm);
-
-            while (!jitterBuffer.isEmpty() &&
-                    jitterBuffer.firstKey() <= (lastPlayedSequence - JITTER_MAX_PLC_FRAMES)) {
-                jitterBuffer.pollFirstEntry(); // evict unusable frames
-            }
-
-            if (jitterBuffer.size() > JITTER_MAX_TOTAL_FRAMES) {
-                jitterBuffer.pollFirstEntry(); // prevent runaway growth
-            }
-        }
+    public void pushAudio(long sequence, byte[] opusPayload, boolean transmitting) {
+        audio.push(sequence, opusPayload, transmitting);
     }
 
     public int popPcmAudio(float[] out, int maxSamples) {
-        synchronized (jitterBuffer) {
-            int filled = 0;
-            long nextSeq = lastPlayedSequence + 1;
-
-            // Initial jitter prefill
-            if (!jitterReady) {
-                if (jitterPrefillStartTime == 0) {
-                    jitterPrefillStartTime = System.currentTimeMillis();
-                }
-
-                int available = 0;
-                long seq = nextSeq;
-                while (jitterBuffer.containsKey(seq++) && available < JITTER_PREFILL_FRAMES) {
-                    available++;
-                }
-
-                if (available >= JITTER_PREFILL_FRAMES ||
-                        (System.currentTimeMillis() - jitterPrefillStartTime) > JITTER_PREFILL_TIMEOUT_MS) {
-                    jitterReady = true;
-                } else {
-                    Arrays.fill(out, 0, maxSamples, 0f);
-                    return 0;
-                }
-            }
-
-            // Playback from jitter buffer
-            while (filled < maxSamples) {
-                float[] frame = jitterBuffer.remove(nextSeq);
-                if (frame == null) break;
-
-                int frameLen = frame.length;
-                int toCopy = Math.min(frameLen, maxSamples - filled);
-                System.arraycopy(frame, 0, out, filled, toCopy);
-                filled += toCopy;
-
-                if (toCopy < frameLen) {
-                    float[] leftover = Arrays.copyOfRange(frame, toCopy, frameLen);
-                    jitterBuffer.put(nextSeq, leftover);
-                    break; // keep same nextSeq on next tick
-                }
-
-                lastPlayedSequence = nextSeq;
-                nextSeq++;
-                plcCount = 0;
-            }
-
-            // If we got any real audio, pad the rest with silence and return full buffer
-            if (filled > 0) {
-                Arrays.fill(out, filled, maxSamples, 0f);
-                return maxSamples;
-            }
-
-            // Check for a future frame
-            Map.Entry<Long, float[]> upcoming = jitterBuffer.firstEntry();
-            if (upcoming != null) {
-                long futureSeq = upcoming.getKey();
-                long gap = futureSeq - nextSeq;
-                if (gap > JITTER_MAX_PLC_FRAMES) {
-                    if (LOG.isWarnEnabled()) {
-                        LOG.warn("Audio gap too large ({} frames), resynchronizing user {}", gap, name);
-                    }
-                    // Too big to fill with PLC → resync
-                    lastPlayedSequence = futureSeq - 1;
-                    plcCount = 0;
-                    return popPcmAudio(out, maxSamples); // retry with adjusted sequence
-                }
-            }
-
-            // Try to fill gap with PLC
-            if (this.transmitting && plcCount < JITTER_MAX_PLC_FRAMES) {
-                plcCount++;
-                lastPlayedSequence = nextSeq;
-
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Generated {} PLC frame", StringUtils.toOrdinal(plcCount));
-                }
-
-                OpusDecoder decoder = client.getSessionDecoder(session);
-                int decoded;
-                synchronized (decoder) {
-                    decoded = decoder.decodeFloat(EMPTY_BYTES, out, SAMPLES_PER_FRAME);
-                }
-
-                if (decoded <= 0) {
-                    Arrays.fill(out, 0, maxSamples, 0f);
-                    return 0;
-                }
-
-                Arrays.fill(out, decoded, maxSamples, 0f);
-                return decoded;
-            }
-
-            // Nothing to play
-            Arrays.fill(out, 0, maxSamples, 0f);
-            return 0;
-        }
+        return audio.pop(out, maxSamples);
     }
 
     public void moveToChannel(MumbleChannel channel) {
@@ -387,19 +243,19 @@ public class MumbleUser {
     }
 
     public boolean isAutoGainEnabled() {
-        return autoGainEnabled;
+        return audio.isAutoGainEnabled();
     }
 
     public void setAutoGainEnabled(boolean autoGainEnabled) {
-        this.autoGainEnabled = autoGainEnabled;
+        audio.setAutoGainEnabled(autoGainEnabled);
     }
 
     public float getManualGain() {
-        return manualGain;
+        return audio.getManualGain();
     }
 
     public void setManualGain(float manualGain) {
-        this.manualGain = manualGain;
+        audio.setManualGain(manualGain);
     }
 
     public String getUrl() {

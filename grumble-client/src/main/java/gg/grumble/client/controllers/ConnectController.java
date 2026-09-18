@@ -3,12 +3,19 @@ package gg.grumble.client.controllers;
 import gg.grumble.client.config.ConfigService;
 import gg.grumble.client.config.ServerConfig;
 import gg.grumble.client.models.MumbleServer;
+import gg.grumble.client.services.FxmlLoaderService;
 import gg.grumble.client.services.MumbleServerListService;
+import gg.grumble.client.utils.Closeable;
 import gg.grumble.client.utils.ExceptionHandler;
 import gg.grumble.client.utils.JavaFxUtils;
+import gg.grumble.client.utils.MumbleBonjourBrowser;
+import gg.grumble.client.utils.MumbleServerPingQueue;
 import gg.grumble.client.utils.WindowIcon;
+import gg.grumble.core.client.MumbleClient;
 import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.collections.FXCollections;
@@ -20,16 +27,21 @@ import javafx.scene.CacheHint;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import javafx.util.Callback;
+import javafx.util.Pair;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.net.URL;
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Component
 @WindowIcon("/icons/connect.png")
-public class ConnectController implements Initializable {
+public class ConnectController implements Initializable, Closeable {
 
     private static final int ICON_SIZE = 20;
 
@@ -46,12 +58,22 @@ public class ConnectController implements Initializable {
     private final TreeItem<ServerEntry> lan;
     private final TreeItem<ServerEntry> internet;
 
+    private final Map<String, TreeItem<ServerEntry>> lanServices = new HashMap<>();
+
     private final MumbleServerListService serverListService;
     private final ConfigService configService;
+    private final FxmlLoaderService fxmlLoaderService;
+    private final MumbleClient client;
 
-    public ConnectController(MumbleServerListService serverListService, ConfigService configService) {
+    private MumbleBonjourBrowser bonjourBrowser;
+    private final MumbleServerPingQueue pingQueue = new MumbleServerPingQueue();
+
+    public ConnectController(MumbleServerListService serverListService, ConfigService configService,
+                              FxmlLoaderService fxmlLoaderService, MumbleClient client) {
         this.serverListService = serverListService;
         this.configService = configService;
+        this.fxmlLoaderService = fxmlLoaderService;
+        this.client = client;
 
         Image favImage = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icons/emblem-favorite.png")),
                 ICON_SIZE, ICON_SIZE, true, true);
@@ -101,8 +123,8 @@ public class ConnectController implements Initializable {
 
         // bind columns to ServerEntry properties
         nameColumn.setCellValueFactory(c -> c.getValue().getValue().nameProperty());
-        pingColumn.setCellValueFactory(c -> c.getValue().getValue().pingProperty().asObject());
-        usersColumn.setCellValueFactory(c -> c.getValue().getValue().usersProperty().asObject());
+        pingColumn.setCellValueFactory(c -> c.getValue().getValue().pingProperty());
+        usersColumn.setCellValueFactory(c -> c.getValue().getValue().usersProperty());
         nameColumn.setCellFactory(col -> new TreeTableCell<>() {
             @Override
             protected void updateItem(String item, boolean empty) {
@@ -157,34 +179,119 @@ public class ConnectController implements Initializable {
             return true;
         });
 
+        treeTableView.setRowFactory(tv -> {
+            TreeTableRow<ServerEntry> row = new TreeTableRow<>();
+            row.setOnMouseClicked(event -> {
+                if (event.getClickCount() == 2 && !row.isEmpty()) {
+                    TreeItem<ServerEntry> item = row.getTreeItem();
+                    if (item != null && !isCategory(item)) {
+                        connect(item.getValue());
+                    }
+                }
+            });
+            return row;
+        });
+
         loadFavoritesList();
         loadServerList();
+        startLanDiscovery();
+    }
+
+    private void startLanDiscovery() {
+        try {
+            bonjourBrowser = new MumbleBonjourBrowser();
+            bonjourBrowser.setListener(new MumbleBonjourBrowser.Listener() {
+                @Override
+                public void onServiceFound(String name, String host, int port) {
+                    JavaFxUtils.runOnFxThread(() -> {
+                        TreeItem<ServerEntry> existing = lanServices.get(name);
+                        if (existing != null) {
+                            existing.getValue().ipProperty().set(host);
+                            existing.getValue().portProperty().set(port);
+                            return;
+                        }
+
+                        TreeItem<ServerEntry> item = new TreeItem<>(new ServerEntry(name, host, port));
+                        lanServices.put(name, item);
+                        lan.getChildren().add(item);
+                        pingEntry(item.getValue(), MumbleServerPingQueue.Priority.LAN);
+                    });
+                }
+
+                @Override
+                public void onServiceLost(String name) {
+                    JavaFxUtils.runOnFxThread(() -> {
+                        TreeItem<ServerEntry> item = lanServices.remove(name);
+                        if (item != null) {
+                            lan.getChildren().remove(item);
+                        }
+                    });
+                }
+            });
+            bonjourBrowser.start();
+        } catch (IOException e) {
+            ExceptionHandler.showLater(e);
+        }
+    }
+
+    @Override
+    public void close() {
+        pingQueue.shutdown();
+
+        if (bonjourBrowser == null) return;
+        try {
+            bonjourBrowser.stop();
+        } catch (IOException e) {
+            ExceptionHandler.showLater(e);
+        }
+        bonjourBrowser = null;
+    }
+
+    private void pingEntry(ServerEntry entry, MumbleServerPingQueue.Priority priority) {
+        pingQueue.ping(entry.ipProperty().get(), entry.portProperty().get(), priority,
+                result -> JavaFxUtils.runOnFxThread(() -> {
+                    entry.setPing((int) result.pingMillis());
+                    entry.setUsers(result.users());
+                }),
+                error -> { /* leave ping/users blank if the server didn't respond */ }
+        );
+    }
+
+    private boolean isCategory(TreeItem<ServerEntry> item) {
+        return item.getParent() == treeTableView.getRoot();
     }
 
     private static Comparator<TreeItem<ServerEntry>> getTreeItemComparator(TreeTableColumn<ServerEntry, ?> col) {
         boolean asc = col.getSortType() == TreeTableColumn.SortType.ASCENDING;
 
-        // build a comparator that extracts the cell value for that column
-        Comparator<TreeItem<ServerEntry>> itemComparator = (a, b) -> {
-            Object va = col.getCellObservableValue(a).getValue();
-            Object vb = col.getCellObservableValue(b).getValue();
-            if (va == null && vb == null) return 0;
-            if (va == null) return -1;
-            if (vb == null) return +1;
+        // compares two non-null cell values, honoring the column's sort direction
+        Comparator<Object> valueComparator = (va, vb) -> {
             @SuppressWarnings("unchecked")
             Comparable<Object> ca = (Comparable<Object>) va;
             return ca.compareTo(vb);
         };
-        if (!asc) itemComparator = itemComparator.reversed();
-        return itemComparator;
+        if (!asc) valueComparator = valueComparator.reversed();
+        Comparator<Object> finalValueComparator = valueComparator;
+
+        // null values (not yet pinged/fetched) always sort last, regardless of direction
+        return (a, b) -> {
+            Object va = col.getCellObservableValue(a).getValue();
+            Object vb = col.getCellObservableValue(b).getValue();
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            return finalValueComparator.compare(va, vb);
+        };
     }
 
     private void loadFavoritesList() {
-        favorites.getChildren().setAll(configService.getConfig().getFavoriteServerList()
+        List<TreeItem<ServerEntry>> items = configService.getConfig().getFavoriteServerList()
                 .stream()
                 .map(ServerEntry::new)
                 .map(TreeItem::new)
-                .toList());
+                .toList();
+        favorites.getChildren().setAll(items);
+        items.forEach(item -> pingEntry(item.getValue(), MumbleServerPingQueue.Priority.FAVORITE));
     }
 
     private void loadServerList() {
@@ -195,22 +302,79 @@ public class ConnectController implements Initializable {
                                     .map(ServerEntry::new)
                                     .map(TreeItem::new)
                                     .collect(Collectors.toList());
-                            JavaFxUtils.runOnFxThread(() -> internet.getChildren().setAll(items));
+                            JavaFxUtils.runOnFxThread(() -> {
+                                internet.getChildren().setAll(items);
+                                items.forEach(item -> pingEntry(item.getValue(), MumbleServerPingQueue.Priority.PUBLIC));
+                            });
                         },
                         ExceptionHandler::showLater
                 );
     }
 
     public void onConnect(ActionEvent actionEvent) {
+        TreeItem<ServerEntry> selected = treeTableView.getSelectionModel().getSelectedItem();
+        if (selected == null || isCategory(selected)) return;
+
+        connect(selected.getValue());
+    }
+
+    private void connect(ServerEntry entry) {
+        String address = entry.ipProperty().get();
+        int port = entry.portProperty().get();
+        if (address == null || address.isBlank()) return;
+
+        String username = entry.getUsername();
+        if (username == null || username.isBlank()) {
+            TextInputDialog dialog = new TextInputDialog();
+            dialog.setTitle("Username");
+            dialog.setHeaderText(null);
+            dialog.setContentText("Enter a username:");
+            Optional<String> result = dialog.showAndWait();
+            if (result.isEmpty() || result.get().isBlank()) return;
+            username = result.get().trim();
+        }
+
+        client.connect(address, port);
+        client.authenticate(username);
+
+        close();
+        ((Stage) treeTableView.getScene().getWindow()).close();
     }
 
     public void onAddNew(ActionEvent actionEvent) {
+        Pair<Stage, AddServerController> stageController = fxmlLoaderService.createWindow("/fxml/addServer.fxml");
+        Stage stage = stageController.getKey();
+        AddServerController controller = stageController.getValue();
+        stage.setTitle("Add Server");
+        stage.initModality(Modality.APPLICATION_MODAL);
+        stage.initStyle(StageStyle.UTILITY);
+        stage.setResizable(false);
+        stage.setOnShown(e -> stage.centerOnScreen());
+        stage.showAndWait();
+
+        ServerConfig newServer = controller.getResult();
+        if (newServer == null) return;
+
+        List<ServerConfig> favoriteServerList = new ArrayList<>(configService.getConfig().getFavoriteServerList());
+        favoriteServerList.add(newServer);
+        configService.getConfig().setFavoriteServerList(favoriteServerList);
+
+        try {
+            configService.saveConfig();
+        } catch (IOException e) {
+            ExceptionHandler.showLater(e);
+            return;
+        }
+
+        loadFavoritesList();
     }
 
     public void onEdit(ActionEvent actionEvent) {
     }
 
     public void onCancel(ActionEvent actionEvent) {
+        close();
+        ((Stage) treeTableView.getScene().getWindow()).close();
     }
 
     /**
@@ -227,8 +391,8 @@ public class ConnectController implements Initializable {
         private final IntegerProperty port = new SimpleIntegerProperty();
         private final StringProperty region = new SimpleStringProperty();
         private final StringProperty url = new SimpleStringProperty();
-        private final IntegerProperty ping = new SimpleIntegerProperty();
-        private final IntegerProperty users = new SimpleIntegerProperty();
+        private final ObjectProperty<Integer> ping = new SimpleObjectProperty<>();
+        private final ObjectProperty<Integer> users = new SimpleObjectProperty<>();
         private final StringProperty username = new SimpleStringProperty();
 
         /**
@@ -258,6 +422,16 @@ public class ConnectController implements Initializable {
         public ServerEntry(String name) {
             this.icon = null;
             this.name.set(name);
+        }
+
+        /**
+         * Populate from a discovered LAN (mDNS/Bonjour) server
+         */
+        public ServerEntry(String name, String ip, int port) {
+            this.icon = null;
+            this.name.set(name);
+            this.ip.set(ip);
+            this.port.set(port);
         }
 
         public ServerEntry(String name, ImageView icon) {
@@ -305,11 +479,11 @@ public class ConnectController implements Initializable {
             return url;
         }
 
-        public IntegerProperty pingProperty() {
+        public ObjectProperty<Integer> pingProperty() {
             return ping;
         }
 
-        public IntegerProperty usersProperty() {
+        public ObjectProperty<Integer> usersProperty() {
             return users;
         }
 

@@ -7,6 +7,12 @@ import static gg.grumble.core.enums.MumbleAudioConfig.SAMPLE_RATE;
 
 @SuppressWarnings("unused")
 public class SourceDataLineOutputDevice implements AudioOutputDevice {
+    // AudioOutput feeds this line a 20ms chunk every 20ms on a fixed-rate thread. Leaving
+    // the mixer's default (often very small) internal buffer means any brief scheduling
+    // hiccup on that thread underruns the line and clicks/stutters, regardless of how
+    // clean the incoming network audio is. Give it real headroom to absorb that jitter.
+    private static final int BUFFER_MILLIS = 200;
+
     private final SourceDataLine audioLine;
 
     public SourceDataLineOutputDevice() throws LineUnavailableException {
@@ -19,7 +25,8 @@ public class SourceDataLineOutputDevice implements AudioOutputDevice {
         );
         DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
         audioLine = (SourceDataLine) AudioSystem.getLine(info);
-        audioLine.open(format);
+        int bufferSizeBytes = format.getFrameSize() * (SAMPLE_RATE * BUFFER_MILLIS / 1000);
+        audioLine.open(format, bufferSizeBytes);
     }
 
     @Override
@@ -59,7 +66,7 @@ public class SourceDataLineOutputDevice implements AudioOutputDevice {
             // Logarithmic volume scaling: perceptually linear
             dB = (float) (Math.log10(volume) * 20.0);
             // Clamp to range
-            dB = Math.max(min, Math.min(dB, max));
+            dB = Math.clamp(dB, min, max);
         }
 
         gainControl.setValue(dB);
@@ -82,7 +89,7 @@ public class SourceDataLineOutputDevice implements AudioOutputDevice {
         float linear = (float) Math.pow(10.0, dB / 20.0);
 
         // Clamp just in case
-        return Math.max(0.0f, Math.min(1.0f, linear));
+        return Math.clamp(linear, 0.0f, 1.0f);
     }
 
     @Override

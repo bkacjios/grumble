@@ -183,11 +183,10 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
 
         GlobalScreen.addNativeKeyListener(this);
 
-        String hostname = "pi-two.lan";
-
-        client.connect(hostname);
-        addMessage(lang.t("mumble.event.connecting", String.format("<span class='log-hostname'>%s</span>", hostname)));
-
+        client.addEventListener(MumbleEvents.Connecting.class, event -> {
+            JavaFxUtils.runOnFxThread(() -> addMessage(lang.t("mumble.event.connecting",
+                    String.format("<span class='log-hostname'>%s</span>", event.hostname()))));
+        });
         client.addEventListener(MumbleEvents.Connected.class, ignored -> {
             client.authenticate("Java-BOT");
             JavaFxUtils.runOnFxThread(() -> addMessage(lang.t("mumble.event.connected")));
@@ -318,6 +317,8 @@ public class GrumbleController implements Initializable, Closeable, NativeKeyLis
                 }
             });
         });
+
+        client.connect("pi-two");
 
         chatMessage.promptTextProperty().bind(
                 Bindings.createStringBinding(() -> {

@@ -35,7 +35,6 @@ import java.util.function.Predicate;
 
 import static gg.grumble.core.enums.MumbleAudioConfig.*;
 import static gg.grumble.core.utils.AudioUtils.bytesToShorts;
-import static gg.grumble.core.utils.AudioUtils.shortsToBytes;
 import static tomp2p.opuswrapper.Opus.OPUS_APPLICATION_RESTRICTED_LOWDELAY;
 
 public class MumbleClient implements Closeable {
@@ -68,15 +67,21 @@ public class MumbleClient implements Closeable {
     private final OpusEncoder opusEncoder;
     private final Map<Long, OpusDecoder> opusDecoders = new ConcurrentHashMap<>();
 
+    /* Reused every tick by mixAndPlayAudio() on the "audio" thread (only ever touched by
+     * that one thread) instead of allocating fresh buffers 50 times a second regardless of
+     * whether anyone is even speaking - that constant churn on a real-time thread is a
+     * classic source of GC-pause-induced stutter. */
+    private final float[] mixBuffer = new float[SAMPLES_PER_FRAME_TOTAL];
+    private final float[] userBuffer = new float[SAMPLES_PER_FRAME_TOTAL];
+    private final short[] outputShorts = new short[SAMPLES_PER_FRAME_TOTAL];
+    private final byte[] outputBytes = new byte[SAMPLES_PER_FRAME_TOTAL * 2];
+
     /* Single thread event scheduler, since we want all events to be processed in order */
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r);
         t.setName("event");
         return t;
     });
-
-    /* Cached thread pool, so we spin up as many threads as we need */
-    private final ExecutorService decoderExecutor = Executors.newCachedThreadPool();
 
     /* Should just contain our scheduled TCP and UDP ping events */
     private final ScheduledExecutorService pingScheduler = Executors.newSingleThreadScheduledExecutor();
@@ -443,8 +448,7 @@ public class MumbleClient implements Closeable {
      */
     private void mixAndPlayAudio() {
         try {
-            float[] mix = new float[SAMPLES_PER_FRAME_TOTAL];
-            float[] buf = new float[SAMPLES_PER_FRAME_TOTAL];
+            Arrays.fill(mixBuffer, 0f);
 
             for (MumbleUser user : users.values()) {
                 // Skip ourselves during playback
@@ -454,7 +458,7 @@ public class MumbleClient implements Closeable {
                 boolean nowSpeaking = false;
 
                 // Try real audio
-                int samples = user.popPcmAudio(buf, SAMPLES_PER_FRAME_TOTAL);
+                int samples = user.popPcmAudio(userBuffer, SAMPLES_PER_FRAME_TOTAL);
                 if (samples > 0) {
                     nowSpeaking = true;
                 }
@@ -474,24 +478,29 @@ public class MumbleClient implements Closeable {
                     if (!user.isLocalMute()) {
                         // Only mix if we aren't locally muted
                         float gain = user.isAutoGainEnabled()
-                                ? computeAutoGain(buf, samples)
+                                ? computeAutoGain(userBuffer, samples)
                                 : user.getManualGain();
                         for (int i = 0; i < samples; i++) {
-                            mix[i] += buf[i] * gain;
+                            mixBuffer[i] += userBuffer[i] * gain;
                         }
                     }
-                    // Trigger speak event with PCM data
-                    fireEvent(new MumbleEvents.UserSpeak(user, Arrays.copyOf(buf, samples)));
+                    // Trigger speak event with PCM data - this copy is intentional, the
+                    // event may be retained by listeners past this tick.
+                    fireEvent(new MumbleEvents.UserSpeak(user, Arrays.copyOf(userBuffer, samples)));
                 }
             }
 
             // Write out final mix to sound device
-            short[] out = new short[SAMPLES_PER_FRAME_TOTAL];
-            for (int i = 0; i < out.length; i++) {
-                float x = softLimit(mix[i]);
-                out[i] = (short) (Math.max(-1f, Math.min(1f, x)) * 32767f);
+            for (int i = 0; i < outputShorts.length; i++) {
+                float x = softLimit(mixBuffer[i]);
+                outputShorts[i] = (short) (Math.clamp(x, -1f, 1f) * 32767f);
             }
-            audioOutput.write(shortsToBytes(out), 0, out.length * 2);
+            for (int i = 0, j = 0; i < outputShorts.length; i++) {
+                short s = outputShorts[i];
+                outputBytes[j++] = (byte) s;
+                outputBytes[j++] = (byte) (s >>> 8);
+            }
+            audioOutput.write(outputBytes, 0, outputBytes.length);
         } catch (Exception e) {
             LOG.error("Exception in playback thread", e);
         }
@@ -753,6 +762,8 @@ public class MumbleClient implements Closeable {
     public void connect(String hostname, int port) {
         close();
 
+        fireEvent(new MumbleEvents.Connecting(hostname));
+
         this.tcpConnection = new MumbleTCPConnection(hostname, port, this::onConnectedTcp, this::processTcpMessage, this::onDisconnected);
         this.udpConnection = new MumbleUDPConnection(hostname, port, this::processUdpMessage);
 
@@ -859,7 +870,7 @@ public class MumbleClient implements Closeable {
     private void handleProtobufAudio(MumbleUDPProto.Audio audio) {
         int session = audio.getSenderSession();
         long sequence = audio.getFrameNumber();
-        boolean transmitting = audio.getIsTerminator();
+        boolean transmitting = !audio.getIsTerminator();
 
         byte[] payload = audio.getOpusData().toByteArray();
         executeDecoderSession(session, sequence, payload, transmitting);
@@ -905,34 +916,23 @@ public class MumbleClient implements Closeable {
         }
     }
 
+    /**
+     * Hands a raw Opus frame off to its sender's jitter buffer. Decode happens lazily,
+     * in strict sequence order, when the audio thread pops the frame for playback - see
+     * {@link gg.grumble.core.audio.UserAudioBuffer}. UDP can deliver packets out of order,
+     * and Opus decoding is stateful, so decoding must not happen in network arrival order.
+     */
     private void executeDecoderSession(long session, long sequence, byte[] payload, boolean transmitting) {
-        decoderExecutor.execute(() -> decodeOpusAndQueue(session, sequence, payload, transmitting));
+        MumbleUser user = getUser(session);
+        if (user != null) {
+            user.pushAudio(sequence, payload, transmitting);
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug("Dropping audio for early/unknown session {}", session);
+        }
     }
 
     public OpusDecoder getSessionDecoder(long session) {
         return opusDecoders.computeIfAbsent(session, k -> new OpusDecoder(SAMPLE_RATE, CHANNELS));
-    }
-
-    private void decodeOpusAndQueue(long session, long sequence, byte[] payload, boolean transmitting) {
-        MumbleUser user = getUser(session);
-        boolean hasUser = (user != null);
-
-        OpusDecoder decoder = getSessionDecoder(session);
-        int frameSize;
-        float[] pcm;
-        int decodedSamples;
-        synchronized (decoder) {
-            frameSize = decoder.getNbSamples(payload);
-            pcm = new float[frameSize * CHANNELS];
-            Arrays.fill(pcm, 0f);
-            decodedSamples = decoder.decodeFloat(payload, pcm, frameSize);
-        }
-
-        if (hasUser) {
-            user.pushPcmAudio(sequence, pcm, decodedSamples, transmitting);
-        } else if (LOG.isDebugEnabled()) {
-            LOG.debug("Decoded {} samples for early user session {}", decodedSamples, session);
-        }
     }
 
     private void handleMessage(MumbleMessageType messageType, MessageLite message) {
@@ -1291,6 +1291,10 @@ public class MumbleClient implements Closeable {
     }
 
     public MumbleUser removeUser(long session) {
+        OpusDecoder decoder = opusDecoders.remove(session);
+        if (decoder != null) {
+            decoder.destroy();
+        }
         return users.remove(session);
     }
 
@@ -1420,7 +1424,6 @@ public class MumbleClient implements Closeable {
         close();
         eventExecutor.close();
         pingScheduler.close();
-        decoderExecutor.shutdown();
         removeAllEventListeners();
     }
 }

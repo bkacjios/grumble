@@ -260,13 +260,22 @@ public class MumbleTCPConnection implements Closeable {
         } catch (IOException ignored) {}
 
         wakeupSelector();
-        executor.shutdownNow();
-        executor.close();
+
+        // close() can be invoked from a task running on this executor's own thread
+        // (e.g. connect() failing). ExecutorService#close() blocks the caller until
+        // the executor terminates, which would deadlock that thread against itself,
+        // so the shutdown is done from a separate thread.
+        Thread shutdown = new Thread(() -> {
+            executor.shutdownNow();
+            executor.close();
+        }, "tcp-shutdown");
+        shutdown.setDaemon(true);
+        shutdown.start();
 
         handshakeComplete = false;
-        netInBuffer.clear();
-        netOutBuffer.clear();
-        appInBuffer.clear();
+        if (netInBuffer != null) netInBuffer.clear();
+        if (netOutBuffer != null) netOutBuffer.clear();
+        if (appInBuffer != null) appInBuffer.clear();
         LOG.info("TCP connection closed");
     }
 
