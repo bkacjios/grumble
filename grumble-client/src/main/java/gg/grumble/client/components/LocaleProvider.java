@@ -1,10 +1,7 @@
 package gg.grumble.client.components;
 
-import org.springframework.stereotype.Component;
-
 import java.util.Locale;
 
-@Component
 public class LocaleProvider {
     private volatile Locale current = Locale.ENGLISH;
 

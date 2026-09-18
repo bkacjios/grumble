@@ -32,13 +32,11 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Callback;
 import javafx.util.Pair;
-import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.net.URL;
 import java.util.*;
 
-@Component
 @WindowIcon("/icons/connect.png")
 public class ConnectController implements Initializable, Closeable {
 
@@ -295,19 +293,20 @@ public class ConnectController implements Initializable, Closeable {
 
     private void loadServerList() {
         serverListService.fetchServers()
-                .subscribe(
-                        list -> {
-                            List<TreeItem<ServerEntry>> items = list.getServers().stream()
-                                    .map(ServerEntry::new)
-                                    .map(TreeItem::new)
-                                    .toList();
-                            JavaFxUtils.runOnFxThread(() -> {
-                                internet.getChildren().setAll(items);
-                                items.forEach(item -> pingEntry(item.getValue(), MumbleServerPingQueue.Priority.PUBLIC));
-                            });
-                        },
-                        ExceptionHandler::showLater
-                );
+                .thenAccept(list -> {
+                    List<TreeItem<ServerEntry>> items = list.getServers().stream()
+                            .map(ServerEntry::new)
+                            .map(TreeItem::new)
+                            .toList();
+                    JavaFxUtils.runOnFxThread(() -> {
+                        internet.getChildren().setAll(items);
+                        items.forEach(item -> pingEntry(item.getValue(), MumbleServerPingQueue.Priority.PUBLIC));
+                    });
+                })
+                .exceptionally(error -> {
+                    ExceptionHandler.showLater(error);
+                    return null;
+                });
     }
 
     public void onConnect(ActionEvent actionEvent) {

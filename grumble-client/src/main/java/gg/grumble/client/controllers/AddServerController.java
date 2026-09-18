@@ -10,13 +10,11 @@ import javafx.scene.control.Button;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.stage.Stage;
-import org.springframework.stereotype.Component;
 
 import java.net.URL;
 import java.util.ResourceBundle;
 import java.util.regex.Pattern;
 
-@Component
 @WindowIcon("/icons/connect.png")
 public class AddServerController implements Initializable, StageAware {
 

@@ -1,9 +1,7 @@
 package gg.grumble.client.components;
 
 import javafx.stage.Stage;
-import org.springframework.stereotype.Component;
 
-@Component
 public class PrimaryStageHolder {
     private Stage stage;
 

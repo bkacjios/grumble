@@ -50,7 +50,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.nodes.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import javax.sound.sampled.LineUnavailableException;
 import java.net.URL;
@@ -60,7 +59,6 @@ import java.util.*;
 import java.util.List;
 import java.util.stream.Stream;
 
-@Component
 @WindowIcon("/icons/talking_off.png")
 public class GrumbleController implements Initializable, Closeable, NativeKeyListener {
     private static final Logger LOG = LoggerFactory.getLogger(GrumbleController.class);

@@ -6,7 +6,6 @@ import gg.grumble.core.client.MumbleClient;
 import gg.grumble.core.client.MumbleEvents;
 import gg.grumble.core.models.MumbleChannel;
 import gg.grumble.core.models.MumbleUser;
-import jakarta.annotation.PostConstruct;
 import org.freedesktop.dbus.annotations.DBusInterfaceName;
 import org.freedesktop.dbus.connections.impl.DBusConnection;
 import org.freedesktop.dbus.interfaces.DBusInterface;
@@ -14,13 +13,11 @@ import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
-@Component
 @SuppressWarnings("unused")
 public class NotificationService {
     private static final Logger LOG = LoggerFactory.getLogger(NotificationService.class);
@@ -50,8 +47,7 @@ public class NotificationService {
         );
     }
 
-    @PostConstruct
-    private void initialize() {
+    public void initialize() {
         client.addEventListener(MumbleEvents.UserConnected.class, event -> {
             if (event.user().getChannel() == client.getSelf().getChannel()) {
                 show("mumble.notification.user.connected",

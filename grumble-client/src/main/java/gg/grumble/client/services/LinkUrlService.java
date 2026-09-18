@@ -1,12 +1,10 @@
 package gg.grumble.client.services;
 
 import org.apache.commons.text.StringEscapeUtils;
-import org.springframework.stereotype.Service;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@Service
 public class LinkUrlService {
 
     private static final String URL_REGEX = "(https?://[\\w\\-._~:/?#\\[\\]@!$&'()*+,;=%]+)";
